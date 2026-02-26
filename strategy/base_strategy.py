@@ -74,6 +74,8 @@ class BaseTradeStrategy(BaseModule):
             self.redis_client.set('LastTradingDay', last_trading_day)
         self._trading_day = timezone.make_aware(datetime.datetime.strptime(trading_day + '08', '%Y%m%d%H'))
         self._last_trading_day = timezone.make_aware(datetime.datetime.strptime(last_trading_day + '08', '%Y%m%d%H'))
+        # CTP 连接状态
+        self._trade_connected: bool = False
 
     # ═══════════════════════════════════════════════════════════════════
     # 参数读取
@@ -102,9 +104,18 @@ class BaseTradeStrategy(BaseModule):
         _, trading = await is_trading_day(today)
         if trading and (820 <= now <= 1550 or 2010 <= now <= 2359):
             await self._session_init()
+        # 延迟检查 CTP 连接状态
+        self.io_loop.call_later(10, asyncio.create_task, self._check_initial_connection())
+
+    async def _check_initial_connection(self):
+        if not self._trade_connected:
+            logger.info('CTP 前置未连接，可能处于非交易时段，等待自动重连...')
 
     async def _session_init(self):
         """盘前初始化：刷新账户、撤销未成交订单、同步持仓"""
+        if not self._trade_connected:
+            logger.warning('CTP 交易前置未连接，跳过 session_init')
+            return
         try:
             await self.refresh_account()
             order_list = await self.query('Order') or []
@@ -657,6 +668,50 @@ class BaseTradeStrategy(BaseModule):
     @RegisterCallback(crontab='*/1 * * * *')
     async def heartbeat(self):
         self.redis_client.set('HEARTBEAT:TRADER', 1, ex=301)
+        self.redis_client.set('STATE:CTP_CONNECTED', int(self._trade_connected), ex=301)
+
+    # ═══════════════════════════════════════════════════════════════════
+    # CTP 连接状态回调
+    # ═══════════════════════════════════════════════════════════════════
+
+    @RegisterCallback(channel='MSG:CTP:RSP:TRADE:OnFrontConnected:*')
+    async def on_ctp_connected(self, channel, data: dict):
+        self._trade_connected = True
+        self.redis_client.set('STATE:CTP_CONNECTED', 1)
+        logger.info('CTP 前置已连接')
+
+    @RegisterCallback(channel='MSG:CTP:RSP:TRADE:OnFrontDisconnected:*')
+    async def on_ctp_disconnected(self, channel, data: dict):
+        self._trade_connected = False
+        self.redis_client.set('STATE:CTP_CONNECTED', 0)
+        reason = data.get('Reason', '未知') if isinstance(data, dict) else '未知'
+        logger.info(f'CTP 前置断开连接，原因: {reason}')
+
+    @RegisterCallback(channel='MSG:CTP:RSP:TRADE:OnRspUserLogin:*')
+    async def on_ctp_login(self, channel, data: dict):
+        if not isinstance(data, dict):
+            return
+        error_id = data.get('ErrorID', -1)
+        if error_id == 0:
+            self._trade_connected = True
+            self.redis_client.set('STATE:CTP_CONNECTED', 1)
+            trading_day = data.get('TradingDay', '')
+            logger.info(f'CTP 登录成功，交易日: {trading_day}')
+            # 如果在交易时段，自动执行盘前初始化
+            today = timezone.localtime()
+            now = int(today.strftime('%H%M'))
+            _, trading = await is_trading_day(today)
+            night_session = await self._has_night_session_tonight()
+            if trading and (850 <= now <= 1550) or night_session and (2050 <= now <= 2359):
+                logger.info('登录后自动执行 session_init...')
+                await self._session_init()
+        else:
+            error_msg = data.get('ErrorMsg', '未知错误')
+            logger.warning(f'CTP 登录失败，ErrorID={error_id}，{error_msg}')
+
+    # ═══════════════════════════════════════════════════════════════════
+    # 盘前初始化定时任务
+    # ═══════════════════════════════════════════════════════════════════
 
     @RegisterCallback(crontab='50 8 * * *')
     async def session_init_day(self):
