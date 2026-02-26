@@ -1,8 +1,6 @@
-#if __has_include(<pybind11/pybind11.h>)
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
-#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstring>
@@ -52,6 +50,32 @@ double get_double(const py::dict &d, const char *key, double fallback = 0.0) {
     return fallback;
   }
   return py::float_(d[py::str(key)]).cast<double>();
+}
+
+py::str decode_text(const char *value) {
+  if (value == nullptr) {
+    return py::str("");
+  }
+  const auto len = std::strlen(value);
+  if (len == 0) {
+    return py::str("");
+  }
+  PyObject *obj =
+      PyUnicode_Decode(value, static_cast<Py_ssize_t>(len), "utf-8", "replace");
+  if (!obj) {
+    PyErr_Clear();
+    obj = PyUnicode_Decode(value, static_cast<Py_ssize_t>(len), "gb18030",
+                           "replace");
+  }
+  if (!obj) {
+    PyErr_Clear();
+    obj = PyUnicode_DecodeLatin1(value, static_cast<Py_ssize_t>(len), nullptr);
+  }
+  if (!obj) {
+    PyErr_Clear();
+    return py::str("");
+  }
+  return py::reinterpret_steal<py::str>(obj);
 }
 
 } // namespace
@@ -273,7 +297,7 @@ public:
       enforce_query_throttle();
     }
 
-    int rc = dispatch_request(req_name, request_id, d);
+    int rc = dispatch_request(req_name, request_id, payload);
     if (rc < 0) {
       py::dict row;
       row["ErrorID"] = rc;
@@ -368,7 +392,7 @@ public:
       row["bIsLast"] = true;
       if (pRspInfo && pRspInfo->ErrorID != 0) {
         row["ErrorID"] = pRspInfo->ErrorID;
-        row["ErrorMsg"] = std::string(pRspInfo->ErrorMsg);
+        row["ErrorMsg"] = decode_text(pRspInfo->ErrorMsg);
       } else {
         row["ErrorID"] = 0;
       }
@@ -387,7 +411,7 @@ public:
     py::dict row;
     if (pRspInfo && pRspInfo->ErrorID != 0) {
       row["ErrorID"] = pRspInfo->ErrorID;
-      row["ErrorMsg"] = std::string(pRspInfo->ErrorMsg);
+      row["ErrorMsg"] = decode_text(pRspInfo->ErrorMsg);
       row["RequestID"] = nRequestID;
       row["bIsLast"] = true;
       emit_event("OnRspUserLogin", row);
@@ -403,14 +427,14 @@ public:
     row["RequestID"] = nRequestID;
     row["bIsLast"] = true;
     if (pRspUserLogin) {
-      row["TradingDay"] = pRspUserLogin->TradingDay;
-      row["LoginTime"] = pRspUserLogin->LoginTime;
-      row["BrokerID"] = pRspUserLogin->BrokerID;
-      row["UserID"] = pRspUserLogin->UserID;
-      row["SystemName"] = pRspUserLogin->SystemName;
+      row["TradingDay"] = decode_text(pRspUserLogin->TradingDay);
+      row["LoginTime"] = decode_text(pRspUserLogin->LoginTime);
+      row["BrokerID"] = decode_text(pRspUserLogin->BrokerID);
+      row["UserID"] = decode_text(pRspUserLogin->UserID);
+      row["SystemName"] = decode_text(pRspUserLogin->SystemName);
       row["FrontID"] = pRspUserLogin->FrontID;
       row["SessionID"] = pRspUserLogin->SessionID;
-      row["MaxOrderRef"] = pRspUserLogin->MaxOrderRef;
+      row["MaxOrderRef"] = decode_text(pRspUserLogin->MaxOrderRef);
     }
     emit_event("OnRspUserLogin", row);
 
@@ -460,7 +484,7 @@ public:
       row["bIsLast"] = true;
       if (pRspInfo && pRspInfo->ErrorID != 0) {
         row["ErrorID"] = pRspInfo->ErrorID;
-        row["ErrorMsg"] = std::string(pRspInfo->ErrorMsg);
+        row["ErrorMsg"] = decode_text(pRspInfo->ErrorMsg);
       } else {
         row["ErrorID"] = 0;
       }
@@ -484,13 +508,13 @@ public:
     py::dict row;
     if (pRspInfo && pRspInfo->ErrorID != 0) {
       row["ErrorID"] = pRspInfo->ErrorID;
-      row["ErrorMsg"] = std::string(pRspInfo->ErrorMsg);
+      row["ErrorMsg"] = decode_text(pRspInfo->ErrorMsg);
       row["empty"] = true;
     } else if (pStruct) {
-      row["BrokerID"] = pStruct->BrokerID;
-      row["InvestorID"] = pStruct->InvestorID;
-      row["ConfirmDate"] = pStruct->ConfirmDate;
-      row["ConfirmTime"] = pStruct->ConfirmTime;
+      row["BrokerID"] = decode_text(pStruct->BrokerID);
+      row["InvestorID"] = decode_text(pStruct->InvestorID);
+      row["ConfirmDate"] = decode_text(pStruct->ConfirmDate);
+      row["ConfirmTime"] = decode_text(pStruct->ConfirmTime);
       row["ErrorID"] = 0;
       row["empty"] = false;
     } else {
@@ -526,7 +550,7 @@ public:
     row["ErrorID"] = error_id;
     row["RequestID"] = request_id;
     if (!error_msg.empty()) {
-      row["ErrorMsg"] = error_msg;
+      row["ErrorMsg"] = decode_text(error_msg.c_str());
     }
     row["bIsLast"] = true;
     row["empty"] = true;
@@ -565,8 +589,8 @@ public:
       row["ErrorID"] = pRspInfo->ErrorID;
       row["empty"] = true;
     } else if (pStruct) {
-      row["BrokerID"] = pStruct->BrokerID;
-      row["AccountID"] = pStruct->AccountID;
+      row["BrokerID"] = decode_text(pStruct->BrokerID);
+      row["AccountID"] = decode_text(pStruct->AccountID);
       row["Withdraw"] = pStruct->Withdraw;
       row["Deposit"] = pStruct->Deposit;
       row["PreBalance"] = pStruct->PreBalance;
@@ -575,7 +599,7 @@ public:
       row["Commission"] = pStruct->Commission;
       row["CurrMargin"] = pStruct->CurrMargin;
       row["Available"] = pStruct->Available;
-      row["TradingDay"] = pStruct->TradingDay;
+      row["TradingDay"] = decode_text(pStruct->TradingDay);
       row["empty"] = false;
     } else {
       row["empty"] = true;
@@ -603,11 +627,11 @@ public:
       row["ErrorID"] = pRspInfo->ErrorID;
       row["empty"] = true;
     } else if (pStruct) {
-      row["InstrumentID"] = pStruct->InstrumentID;
-      row["BrokerID"] = pStruct->BrokerID;
-      row["InvestorID"] = pStruct->InvestorID;
+      row["InstrumentID"] = decode_text(pStruct->InstrumentID);
+      row["BrokerID"] = decode_text(pStruct->BrokerID);
+      row["InvestorID"] = decode_text(pStruct->InvestorID);
       row["Direction"] = pStruct->Direction;
-      row["OpenDate"] = pStruct->OpenDate;
+      row["OpenDate"] = decode_text(pStruct->OpenDate);
       row["Volume"] = pStruct->Volume;
       row["OpenPrice"] = pStruct->OpenPrice;
       row["PositionProfitByTrade"] = pStruct->PositionProfitByTrade;
@@ -639,10 +663,10 @@ public:
       row["ErrorID"] = pRspInfo->ErrorID;
       row["empty"] = true;
     } else if (pStruct) {
-      row["InstrumentID"] = pStruct->InstrumentID;
-      row["ExchangeID"] = pStruct->ExchangeID;
-      row["InstrumentName"] = std::string(pStruct->InstrumentName);
-      row["ProductID"] = pStruct->ProductID;
+      row["InstrumentID"] = decode_text(pStruct->InstrumentID);
+      row["ExchangeID"] = decode_text(pStruct->ExchangeID);
+      row["InstrumentName"] = decode_text(pStruct->InstrumentName);
+      row["ProductID"] = decode_text(pStruct->ProductID);
       row["ProductClass"] = pStruct->ProductClass;
       row["VolumeMultiple"] = pStruct->VolumeMultiple;
       row["PriceTick"] = pStruct->PriceTick;
@@ -675,17 +699,17 @@ public:
       row["ErrorID"] = pRspInfo->ErrorID;
       row["empty"] = true;
     } else if (pStruct) {
-      row["InstrumentID"] = pStruct->InstrumentID;
-      row["BrokerID"] = pStruct->BrokerID;
-      row["InvestorID"] = pStruct->InvestorID;
+      row["InstrumentID"] = decode_text(pStruct->InstrumentID);
+      row["BrokerID"] = decode_text(pStruct->BrokerID);
+      row["InvestorID"] = decode_text(pStruct->InvestorID);
       row["OpenRatioByMoney"] = pStruct->OpenRatioByMoney;
       row["OpenRatioByVolume"] = pStruct->OpenRatioByVolume;
       row["CloseRatioByMoney"] = pStruct->CloseRatioByMoney;
       row["CloseRatioByVolume"] = pStruct->CloseRatioByVolume;
       row["CloseTodayRatioByMoney"] = pStruct->CloseTodayRatioByMoney;
       row["CloseTodayRatioByVolume"] = pStruct->CloseTodayRatioByVolume;
-      row["ExchangeID"] = pStruct->ExchangeID;
-      row["InvestUnitID"] = pStruct->InvestUnitID;
+      row["ExchangeID"] = decode_text(pStruct->ExchangeID);
+      row["InvestUnitID"] = decode_text(pStruct->InvestUnitID);
       row["empty"] = false;
     } else {
       row["empty"] = true;
@@ -714,17 +738,17 @@ public:
       row["ErrorID"] = pRspInfo->ErrorID;
       row["empty"] = true;
     } else if (pStruct) {
-      row["InstrumentID"] = pStruct->InstrumentID;
-      row["BrokerID"] = pStruct->BrokerID;
-      row["InvestorID"] = pStruct->InvestorID;
+      row["InstrumentID"] = decode_text(pStruct->InstrumentID);
+      row["BrokerID"] = decode_text(pStruct->BrokerID);
+      row["InvestorID"] = decode_text(pStruct->InvestorID);
       row["HedgeFlag"] = pStruct->HedgeFlag;
       row["LongMarginRatioByMoney"] = pStruct->LongMarginRatioByMoney;
       row["LongMarginRatioByVolume"] = pStruct->LongMarginRatioByVolume;
       row["ShortMarginRatioByMoney"] = pStruct->ShortMarginRatioByMoney;
       row["ShortMarginRatioByVolume"] = pStruct->ShortMarginRatioByVolume;
       row["IsRelative"] = pStruct->IsRelative;
-      row["ExchangeID"] = pStruct->ExchangeID;
-      row["InvestUnitID"] = pStruct->InvestUnitID;
+      row["ExchangeID"] = decode_text(pStruct->ExchangeID);
+      row["InvestUnitID"] = decode_text(pStruct->InvestUnitID);
       row["empty"] = false;
     } else {
       row["empty"] = true;
@@ -752,8 +776,8 @@ public:
       row["ErrorID"] = pRspInfo->ErrorID;
       row["empty"] = true;
     } else if (pStruct) {
-      row["InstrumentID"] = pStruct->InstrumentID;
-      row["OrderRef"] = pStruct->OrderRef;
+      row["InstrumentID"] = decode_text(pStruct->InstrumentID);
+      row["OrderRef"] = decode_text(pStruct->OrderRef);
       row["Direction"] = pStruct->Direction;
       row["CombOffsetFlag"] = pStruct->CombOffsetFlag;
       row["LimitPrice"] = pStruct->LimitPrice;
@@ -762,15 +786,15 @@ public:
       row["OrderStatus"] = pStruct->OrderStatus;
       row["VolumeTraded"] = pStruct->VolumeTraded;
       row["VolumeTotal"] = pStruct->VolumeTotal;
-      row["InsertDate"] = pStruct->InsertDate;
-      row["InsertTime"] = pStruct->InsertTime;
-      row["UpdateTime"] = pStruct->UpdateTime;
-      row["CancelTime"] = pStruct->CancelTime;
-      row["ExchangeID"] = pStruct->ExchangeID;
-      row["OrderSysID"] = pStruct->OrderSysID;
+      row["InsertDate"] = decode_text(pStruct->InsertDate);
+      row["InsertTime"] = decode_text(pStruct->InsertTime);
+      row["UpdateTime"] = decode_text(pStruct->UpdateTime);
+      row["CancelTime"] = decode_text(pStruct->CancelTime);
+      row["ExchangeID"] = decode_text(pStruct->ExchangeID);
+      row["OrderSysID"] = decode_text(pStruct->OrderSysID);
       row["FrontID"] = pStruct->FrontID;
       row["SessionID"] = pStruct->SessionID;
-      row["StatusMsg"] = std::string(pStruct->StatusMsg);
+      row["StatusMsg"] = decode_text(pStruct->StatusMsg);
       row["empty"] = false;
     } else {
       row["empty"] = true;
@@ -798,23 +822,23 @@ public:
       row["ErrorID"] = pRspInfo->ErrorID;
       row["empty"] = true;
     } else if (pStruct) {
-      row["BrokerID"] = pStruct->BrokerID;
-      row["InvestorID"] = pStruct->InvestorID;
-      row["InstrumentID"] = pStruct->InstrumentID;
-      row["OrderRef"] = pStruct->OrderRef;
-      row["UserID"] = pStruct->UserID;
-      row["ExchangeID"] = pStruct->ExchangeID;
-      row["TradeID"] = pStruct->TradeID;
+      row["BrokerID"] = decode_text(pStruct->BrokerID);
+      row["InvestorID"] = decode_text(pStruct->InvestorID);
+      row["InstrumentID"] = decode_text(pStruct->InstrumentID);
+      row["OrderRef"] = decode_text(pStruct->OrderRef);
+      row["UserID"] = decode_text(pStruct->UserID);
+      row["ExchangeID"] = decode_text(pStruct->ExchangeID);
+      row["TradeID"] = decode_text(pStruct->TradeID);
       row["Direction"] = pStruct->Direction;
-      row["OrderSysID"] = pStruct->OrderSysID;
+      row["OrderSysID"] = decode_text(pStruct->OrderSysID);
       row["OffsetFlag"] = pStruct->OffsetFlag;
       row["HedgeFlag"] = pStruct->HedgeFlag;
       row["Price"] = pStruct->Price;
       row["Volume"] = pStruct->Volume;
-      row["TradeDate"] = pStruct->TradeDate;
-      row["TradeTime"] = pStruct->TradeTime;
+      row["TradeDate"] = decode_text(pStruct->TradeDate);
+      row["TradeTime"] = decode_text(pStruct->TradeTime);
       row["TradeType"] = pStruct->TradeType;
-      row["TradingDay"] = pStruct->TradingDay;
+      row["TradingDay"] = decode_text(pStruct->TradingDay);
       row["empty"] = false;
     } else {
       row["empty"] = true;
@@ -844,8 +868,8 @@ public:
       row["ErrorID"] = 0;
     }
     if (pStruct) {
-      row["InstrumentID"] = pStruct->InstrumentID;
-      row["OrderRef"] = pStruct->OrderRef;
+      row["InstrumentID"] = decode_text(pStruct->InstrumentID);
+      row["OrderRef"] = decode_text(pStruct->OrderRef);
       row["Direction"] = pStruct->Direction;
       row["CombOffsetFlag"] = pStruct->CombOffsetFlag;
       row["LimitPrice"] = pStruct->LimitPrice;
@@ -871,10 +895,10 @@ public:
       row["ErrorID"] = 0;
     }
     if (pStruct) {
-      row["ExchangeID"] = pStruct->ExchangeID;
-      row["InstrumentID"] = pStruct->InstrumentID;
-      row["OrderSysID"] = pStruct->OrderSysID;
-      row["OrderRef"] = pStruct->OrderRef;
+      row["ExchangeID"] = decode_text(pStruct->ExchangeID);
+      row["InstrumentID"] = decode_text(pStruct->InstrumentID);
+      row["OrderSysID"] = decode_text(pStruct->OrderSysID);
+      row["OrderRef"] = decode_text(pStruct->OrderRef);
     }
     row["RequestID"] = nRequestID;
     row["bIsLast"] = bIsLast;
@@ -900,8 +924,8 @@ public:
     }
     py::gil_scoped_acquire gil;
     py::dict row;
-    row["InstrumentID"] = pStruct->InstrumentID;
-    row["OrderRef"] = pStruct->OrderRef;
+    row["InstrumentID"] = decode_text(pStruct->InstrumentID);
+    row["OrderRef"] = decode_text(pStruct->OrderRef);
     row["Direction"] = pStruct->Direction;
     row["CombOffsetFlag"] = pStruct->CombOffsetFlag;
     row["LimitPrice"] = pStruct->LimitPrice;
@@ -910,14 +934,14 @@ public:
     row["OrderStatus"] = pStruct->OrderStatus;
     row["VolumeTraded"] = pStruct->VolumeTraded;
     row["VolumeTotal"] = pStruct->VolumeTotal;
-    row["InsertDate"] = pStruct->InsertDate;
-    row["InsertTime"] = pStruct->InsertTime;
-    row["ExchangeID"] = pStruct->ExchangeID;
-    row["OrderSysID"] = pStruct->OrderSysID;
+    row["InsertDate"] = decode_text(pStruct->InsertDate);
+    row["InsertTime"] = decode_text(pStruct->InsertTime);
+    row["ExchangeID"] = decode_text(pStruct->ExchangeID);
+    row["OrderSysID"] = decode_text(pStruct->OrderSysID);
     row["FrontID"] = pStruct->FrontID;
     row["SessionID"] = pStruct->SessionID;
-    row["UserID"] = pStruct->UserID;
-    row["StatusMsg"] = std::string(pStruct->StatusMsg);
+    row["UserID"] = decode_text(pStruct->UserID);
+    row["StatusMsg"] = decode_text(pStruct->StatusMsg);
     emit_event("OnRtnOrder", row);
   }
 
@@ -927,23 +951,23 @@ public:
     }
     py::gil_scoped_acquire gil;
     py::dict row;
-    row["BrokerID"] = pStruct->BrokerID;
-    row["InvestorID"] = pStruct->InvestorID;
-    row["InstrumentID"] = pStruct->InstrumentID;
-    row["OrderRef"] = pStruct->OrderRef;
-    row["UserID"] = pStruct->UserID;
-    row["ExchangeID"] = pStruct->ExchangeID;
-    row["TradeID"] = pStruct->TradeID;
+    row["BrokerID"] = decode_text(pStruct->BrokerID);
+    row["InvestorID"] = decode_text(pStruct->InvestorID);
+    row["InstrumentID"] = decode_text(pStruct->InstrumentID);
+    row["OrderRef"] = decode_text(pStruct->OrderRef);
+    row["UserID"] = decode_text(pStruct->UserID);
+    row["ExchangeID"] = decode_text(pStruct->ExchangeID);
+    row["TradeID"] = decode_text(pStruct->TradeID);
     row["Direction"] = pStruct->Direction;
-    row["OrderSysID"] = pStruct->OrderSysID;
+    row["OrderSysID"] = decode_text(pStruct->OrderSysID);
     row["OffsetFlag"] = pStruct->OffsetFlag;
     row["HedgeFlag"] = pStruct->HedgeFlag;
     row["Price"] = pStruct->Price;
     row["Volume"] = pStruct->Volume;
-    row["TradeDate"] = pStruct->TradeDate;
-    row["TradeTime"] = pStruct->TradeTime;
+    row["TradeDate"] = decode_text(pStruct->TradeDate);
+    row["TradeTime"] = decode_text(pStruct->TradeTime);
     row["TradeType"] = pStruct->TradeType;
-    row["TradingDay"] = pStruct->TradingDay;
+    row["TradingDay"] = decode_text(pStruct->TradingDay);
     emit_event("OnRtnTrade", row);
   }
 
@@ -957,7 +981,7 @@ public:
       row["ErrorID"] = pRspInfo->ErrorID;
       row["empty"] = true;
     } else if (pSpecificInstrument) {
-      row["InstrumentID"] = pSpecificInstrument->InstrumentID;
+      row["InstrumentID"] = decode_text(pSpecificInstrument->InstrumentID);
       row["empty"] = false;
     } else {
       row["empty"] = true;
@@ -984,8 +1008,8 @@ public:
     }
     py::gil_scoped_acquire gil;
     py::dict row;
-    row["TradingDay"] = pData->TradingDay;
-    row["InstrumentID"] = pData->InstrumentID;
+    row["TradingDay"] = decode_text(pData->TradingDay);
+    row["InstrumentID"] = decode_text(pData->InstrumentID);
     row["LastPrice"] = pData->LastPrice;
     row["OpenPrice"] = pData->OpenPrice;
     row["HighestPrice"] = pData->HighestPrice;
@@ -999,10 +1023,11 @@ public:
     row["BidVolume1"] = pData->BidVolume1;
     row["AskPrice1"] = pData->AskPrice1;
     row["AskVolume1"] = pData->AskVolume1;
-    row["ActionDay"] = pData->ActionDay;
-    row["UpdateTime"] = std::string(pData->ActionDay) + " " +
-                        std::string(pData->UpdateTime) + ":" +
-                        std::to_string(pData->UpdateMillisec * 1000);
+    row["ActionDay"] = decode_text(pData->ActionDay);
+    row["UpdateTime"] = decode_text(pData->ActionDay).cast<std::string>() +
+                        " " +
+                        decode_text(pData->UpdateTime).cast<std::string>() +
+                        ":" + std::to_string(pData->UpdateMillisec * 1000);
 
     emit_event("OnRtnDepthMarketData", row);
   }
@@ -1055,7 +1080,11 @@ private:
   }
 
   int dispatch_request(const std::string &req_name, int request_id,
-                       const py::dict &payload) {
+                       const py::object &payload) {
+    py::dict payload_dict;
+    if (py::isinstance<py::dict>(payload)) {
+      payload_dict = payload.cast<py::dict>();
+    }
     if (req_name == "ReqQryTradingAccount") {
       CThostFtdcQryTradingAccountField req{};
       copy_cstr(req.BrokerID, sizeof(req.BrokerID), broker_id_);
@@ -1067,15 +1096,15 @@ private:
       copy_cstr(req.BrokerID, sizeof(req.BrokerID), broker_id_);
       copy_cstr(req.InvestorID, sizeof(req.InvestorID), investor_id_);
       copy_cstr(req.InstrumentID, sizeof(req.InstrumentID),
-                get_str(payload, "InstrumentID"));
+                get_str(payload_dict, "InstrumentID"));
       return trader_api_->ReqQryInvestorPositionDetail(&req, request_id);
     }
     if (req_name == "ReqQryInstrument") {
       CThostFtdcQryInstrumentField req{};
       copy_cstr(req.InstrumentID, sizeof(req.InstrumentID),
-                get_str(payload, "InstrumentID"));
+                get_str(payload_dict, "InstrumentID"));
       copy_cstr(req.ExchangeID, sizeof(req.ExchangeID),
-                get_str(payload, "ExchangeID"));
+                get_str(payload_dict, "ExchangeID"));
       return trader_api_->ReqQryInstrument(&req, request_id);
     }
     if (req_name == "ReqQryInstrumentCommissionRate") {
@@ -1083,11 +1112,11 @@ private:
       copy_cstr(req.BrokerID, sizeof(req.BrokerID), broker_id_);
       copy_cstr(req.InvestorID, sizeof(req.InvestorID), investor_id_);
       copy_cstr(req.InstrumentID, sizeof(req.InstrumentID),
-                get_str(payload, "InstrumentID"));
+                get_str(payload_dict, "InstrumentID"));
       copy_cstr(req.ExchangeID, sizeof(req.ExchangeID),
-                get_str(payload, "ExchangeID"));
+                get_str(payload_dict, "ExchangeID"));
       copy_cstr(req.InvestUnitID, sizeof(req.InvestUnitID),
-                get_str(payload, "InvestUnitID"));
+                get_str(payload_dict, "InvestUnitID"));
       return trader_api_->ReqQryInstrumentCommissionRate(&req, request_id);
     }
     if (req_name == "ReqQryInstrumentMarginRate") {
@@ -1095,14 +1124,14 @@ private:
       copy_cstr(req.BrokerID, sizeof(req.BrokerID), broker_id_);
       copy_cstr(req.InvestorID, sizeof(req.InvestorID), investor_id_);
       copy_cstr(req.InstrumentID, sizeof(req.InstrumentID),
-                get_str(payload, "InstrumentID"));
-      auto hedge_flag = get_str(payload, "HedgeFlag");
+                get_str(payload_dict, "InstrumentID"));
+      auto hedge_flag = get_str(payload_dict, "HedgeFlag");
       req.HedgeFlag =
           hedge_flag.empty() ? THOST_FTDC_HF_Speculation : hedge_flag[0];
       copy_cstr(req.ExchangeID, sizeof(req.ExchangeID),
-                get_str(payload, "ExchangeID"));
+                get_str(payload_dict, "ExchangeID"));
       copy_cstr(req.InvestUnitID, sizeof(req.InvestUnitID),
-                get_str(payload, "InvestUnitID"));
+                get_str(payload_dict, "InvestUnitID"));
       return trader_api_->ReqQryInstrumentMarginRate(&req, request_id);
     }
     if (req_name == "ReqQryOrder") {
@@ -1110,17 +1139,17 @@ private:
       copy_cstr(req.BrokerID, sizeof(req.BrokerID), broker_id_);
       copy_cstr(req.InvestorID, sizeof(req.InvestorID), investor_id_);
       copy_cstr(req.InstrumentID, sizeof(req.InstrumentID),
-                get_str(payload, "InstrumentID"));
+                get_str(payload_dict, "InstrumentID"));
       copy_cstr(req.ExchangeID, sizeof(req.ExchangeID),
-                get_str(payload, "ExchangeID"));
+                get_str(payload_dict, "ExchangeID"));
       copy_cstr(req.OrderSysID, sizeof(req.OrderSysID),
-                get_str(payload, "OrderSysID"));
+                get_str(payload_dict, "OrderSysID"));
       copy_cstr(req.InsertTimeStart, sizeof(req.InsertTimeStart),
-                get_str(payload, "InsertTimeStart"));
+                get_str(payload_dict, "InsertTimeStart"));
       copy_cstr(req.InsertTimeEnd, sizeof(req.InsertTimeEnd),
-                get_str(payload, "InsertTimeEnd"));
+                get_str(payload_dict, "InsertTimeEnd"));
       copy_cstr(req.InvestUnitID, sizeof(req.InvestUnitID),
-                get_str(payload, "InvestUnitID"));
+                get_str(payload_dict, "InvestUnitID"));
       return trader_api_->ReqQryOrder(&req, request_id);
     }
     if (req_name == "ReqQryTrade") {
@@ -1128,16 +1157,17 @@ private:
       copy_cstr(req.BrokerID, sizeof(req.BrokerID), broker_id_);
       copy_cstr(req.InvestorID, sizeof(req.InvestorID), investor_id_);
       copy_cstr(req.InstrumentID, sizeof(req.InstrumentID),
-                get_str(payload, "InstrumentID"));
+                get_str(payload_dict, "InstrumentID"));
       copy_cstr(req.ExchangeID, sizeof(req.ExchangeID),
-                get_str(payload, "ExchangeID"));
-      copy_cstr(req.TradeID, sizeof(req.TradeID), get_str(payload, "TradeID"));
+                get_str(payload_dict, "ExchangeID"));
+      copy_cstr(req.TradeID, sizeof(req.TradeID),
+                get_str(payload_dict, "TradeID"));
       copy_cstr(req.TradeTimeStart, sizeof(req.TradeTimeStart),
-                get_str(payload, "TradeTimeStart"));
+                get_str(payload_dict, "TradeTimeStart"));
       copy_cstr(req.TradeTimeEnd, sizeof(req.TradeTimeEnd),
-                get_str(payload, "TradeTimeEnd"));
+                get_str(payload_dict, "TradeTimeEnd"));
       copy_cstr(req.InvestUnitID, sizeof(req.InvestUnitID),
-                get_str(payload, "InvestUnitID"));
+                get_str(payload_dict, "InvestUnitID"));
       return trader_api_->ReqQryTrade(&req, request_id);
     }
     if (req_name == "SubscribeMarketData") {
@@ -1173,18 +1203,18 @@ private:
     if (req_name == "ReqOrderInsert") {
       CThostFtdcInputOrderField req{};
       copy_cstr(req.InstrumentID, sizeof(req.InstrumentID),
-                get_str(payload, "InstrumentID"));
+                get_str(payload_dict, "InstrumentID"));
       copy_cstr(req.OrderRef, sizeof(req.OrderRef),
-                get_str(payload, "OrderRef"));
-      req.Direction = get_str(payload, "Direction").empty()
+                get_str(payload_dict, "OrderRef"));
+      req.Direction = get_str(payload_dict, "Direction").empty()
                           ? '\0'
-                          : get_str(payload, "Direction")[0];
-      req.LimitPrice = get_double(payload, "LimitPrice", 0.0);
-      req.VolumeTotalOriginal = get_int(payload, "VolumeTotalOriginal", 0);
+                          : get_str(payload_dict, "Direction")[0];
+      req.LimitPrice = get_double(payload_dict, "LimitPrice", 0.0);
+      req.VolumeTotalOriginal = get_int(payload_dict, "VolumeTotalOriginal", 0);
       req.OrderPriceType = THOST_FTDC_OPT_LimitPrice;
       copy_cstr(req.BrokerID, sizeof(req.BrokerID), broker_id_);
       copy_cstr(req.InvestorID, sizeof(req.InvestorID), investor_id_);
-      auto cof = get_str(payload, "CombOffsetFlag");
+      auto cof = get_str(payload_dict, "CombOffsetFlag");
       req.CombOffsetFlag[0] = cof.empty() ? '\0' : cof[0];
       req.CombHedgeFlag[0] = THOST_FTDC_HF_Speculation;
       req.VolumeCondition = THOST_FTDC_VC_AV;
@@ -1203,13 +1233,13 @@ private:
       copy_cstr(req.BrokerID, sizeof(req.BrokerID), broker_id_);
       copy_cstr(req.InvestorID, sizeof(req.InvestorID), investor_id_);
       copy_cstr(req.ExchangeID, sizeof(req.ExchangeID),
-                get_str(payload, "ExchangeID"));
+                get_str(payload_dict, "ExchangeID"));
       copy_cstr(req.UserID, sizeof(req.UserID),
-                get_str(payload, "UserID", investor_id_));
+                get_str(payload_dict, "UserID", investor_id_));
       copy_cstr(req.InstrumentID, sizeof(req.InstrumentID),
-                get_str(payload, "InstrumentID"));
+                get_str(payload_dict, "InstrumentID"));
       copy_cstr(req.OrderSysID, sizeof(req.OrderSysID),
-                get_str(payload, "OrderSysID"));
+                get_str(payload_dict, "OrderSysID"));
       req.OrderActionRef = request_id + 1;
       req.ActionFlag = THOST_FTDC_AF_Delete;
       copy_cstr(req.IPAddress, sizeof(req.IPAddress), ip_);
@@ -1412,6 +1442,3 @@ PYBIND11_MODULE(ctp_bridge_native, m) {
       .def("set_event_callback", &CtpClient::set_event_callback)
       .def("request", &CtpClient::request);
 }
-#else
-int ctp_bridge_native_stub = 0;
-#endif

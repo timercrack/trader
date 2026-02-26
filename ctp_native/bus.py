@@ -121,6 +121,18 @@ class LocalRedisLikeClient:
         return 1
 
     async def _on_gateway_event(self, topic: str, data: dict[str, Any]):
+        if topic in {
+            'OnFrontConnected',
+            'OnFrontDisconnected',
+            'OnFrontConnectedMd',
+            'OnFrontDisconnectedMd',
+            'OnRspAuthenticate',
+            'OnRspUserLogin',
+            'OnRspUserLoginMd',
+            'OnRspSettlementInfoConfirm',
+            'OnRspError',
+        }:
+            logger.debug('gateway event %s: %s', topic, data)
         # 统一兼容历史 channel 风格
         if topic.startswith('OnRtnDepthMarketData'):
             inst = data.get('InstrumentID', 'UNKNOWN')

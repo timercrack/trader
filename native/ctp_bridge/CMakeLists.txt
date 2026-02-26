@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.18)
 project(ctp_bridge_native LANGUAGES CXX)
 
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -18,7 +20,6 @@ find_package(pybind11 CONFIG REQUIRED)
 pybind11_add_module(ctp_bridge_native src/py_module.cpp)
 
 if(MSVC)
-    # 使用最新 C++ 标准并统一源码/执行字符集为 UTF-8
     target_compile_options(ctp_bridge_native PRIVATE /std:c++latest /utf-8)
 endif()
 
@@ -44,5 +45,23 @@ if(WIN32)
         )
     else()
         message(WARNING "Thost .lib files not found under ${THOST_API_DIR}, build will use header-only skeleton.")
+    endif()
+endif()
+
+if(UNIX)
+    set(THOST_TRADER_SO ${THOST_API_DIR}/thosttraderapi_se.so)
+    set(THOST_MD_SO ${THOST_API_DIR}/thostmduserapi_se.so)
+    if(EXISTS ${THOST_TRADER_SO} AND EXISTS ${THOST_MD_SO})
+        target_link_directories(ctp_bridge_native PRIVATE ${THOST_API_DIR})
+        target_link_libraries(ctp_bridge_native PRIVATE
+            "-l:thosttraderapi_se.so"
+            "-l:thostmduserapi_se.so"
+        )
+        set_target_properties(ctp_bridge_native PROPERTIES
+            BUILD_RPATH "${THOST_API_DIR}"
+            INSTALL_RPATH "$ORIGIN/native/ctp_bridge/api/linux;$ORIGIN"
+        )
+    else()
+        message(WARNING "Thost .so files not found under ${THOST_API_DIR}, build will use header-only skeleton.")
     endif()
 endif()

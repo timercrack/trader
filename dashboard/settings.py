@@ -16,24 +16,57 @@ import logging
 from appdirs import AppDirs
 from pathlib import Path
 import platform
+import yaml
 
 LOCAL_PORT = 3306
 logger = logging.getLogger('dashboard.settings')
 ssh_tunnel = None
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+
+def _load_root_config_yaml():
+    config_path = BASE_DIR / 'config.yaml'
+    if not config_path.exists():
+        return {}
+    with open(config_path, 'rt', encoding='utf-8') as f:
+        data = yaml.safe_load(f) or {}
+    return data if isinstance(data, dict) else {}
+
+
+ROOT_CONFIG = _load_root_config_yaml()
 
 
 def _start_ssh_tunnel_if_needed():
     global ssh_tunnel, LOCAL_PORT
-    if platform.node() == "bighelper.top":
+    tunnel_cfg = ROOT_CONFIG.get('ssh_tunnel', {}) if isinstance(ROOT_CONFIG.get('ssh_tunnel', {}), dict) else {}
+    local_node = str(tunnel_cfg.get('local_node', '')).strip()
+    if local_node and platform.node() == local_node:
         return
     try:
+        enabled = bool(tunnel_cfg.get('enabled', True))
+        if not enabled:
+            logger.info('SSH tunnel disabled by config.yaml ssh_tunnel.enabled=false')
+            return
+
         from sshtunnel import SSHTunnelForwarder
-        ssh_key = r"C:\Users\timer\.ssh\id_ed25519.ppk" if sys.platform == 'win32' else '/root/.ssh/id_ed25519'
+        ssh_host = str(tunnel_cfg.get('host', '')).strip()
+        ssh_port = int(tunnel_cfg.get('port', 22) or 22)
+        ssh_username = 'root'
+        if sys.platform == 'win32':
+            ssh_key = str(tunnel_cfg.get('private_key_win', '')).strip()
+        else:
+            ssh_key = str(tunnel_cfg.get('private_key_linux', '')).strip()
+
+        if not ssh_host or not ssh_key:
+            logger.warning('SSH tunnel config missing required fields(host/private_key_[linux|win]), fallback to local mysql 3306')
+            LOCAL_PORT = 3306
+            return
+
         ssh_tunnel = SSHTunnelForwarder(
-            ("101.43.143.170", 22),
+            (ssh_host, ssh_port),
             ssh_private_key=ssh_key,
-            ssh_username="root",
-            remote_bind_address=("127.0.0.1", 3306),
+            ssh_username=ssh_username,
+            remote_bind_address=('127.0.0.1', 3306),
         )
         ssh_tunnel.start()
         LOCAL_PORT = ssh_tunnel.local_bind_port
@@ -47,16 +80,11 @@ def _start_ssh_tunnel_if_needed():
 
         atexit.register(_cleanup_tunnel)
     except Exception as e:
-        # 启动失败则继续使用本地3306，便于无隧道环境下开发调试
         logger.warning('SSH tunnel start failed, fallback to local mysql 3306: %s', repr(e))
         LOCAL_PORT = 3306
 
 
 _start_ssh_tunnel_if_needed()
-
-# Build paths inside the project like this: BASE_DIR / 'subdir'.
-BASE_DIR = Path(__file__).resolve().parent.parent
-
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/3.2/howto/deployment/checklist/
@@ -133,17 +161,18 @@ LOGGING = {
     'formatters': {'my_formatter': {'format': '%(asctime)s %(name)s [%(levelname)s] %(message)s'}},
     'handlers': {
         'file': {
-            'level': 'INFO',
+            'level': 'DEBUG',
             'class': 'logging.handlers.RotatingFileHandler',
             'filename': os.path.join(app_dir.user_log_dir, 'dashboard.log'),
             'maxBytes': 1024 * 1024 * 5,  # 5 MB
             'backupCount': 5,
             'formatter': 'my_formatter',
         },
-        'console': {'level': 'INFO', 'class': 'logging.StreamHandler', 'formatter': 'my_formatter'},
+        'console': {'level': 'DEBUG', 'class': 'logging.StreamHandler', 'formatter': 'my_formatter'},
     },
     'loggers': {
-        'panel': {'handlers': ['file', 'console']}
+        'panel': {'handlers': ['file', 'console'], 'level': 'DEBUG'},
+        'dashboard.settings': {'handlers': ['file', 'console'], 'level': 'DEBUG'},
     }
 }
 

@@ -21,3 +21,4 @@ matplotlib
 safetensors
 sshtunnel
 pybind11
+PyYAML

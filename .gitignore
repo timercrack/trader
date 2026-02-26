@@ -6,12 +6,13 @@ __pycache__/
 *.so
 *.egg-info/
 .Python
-
+.github/
 # Virtual environments
 .venv/
 venv/
 env/
 ENV/
+.python-version
 
 # Packaging / build artifacts
 build/
@@ -36,17 +37,16 @@ media/
 staticfiles/
 
 # ===== Local runtime/config/secrets =====
-.env
-.env.*
-!.env.example
 config.ini
-test/
+config.yaml
 examples/
 # ===== IDE / Editor =====
 .idea/
 .vscode/
 *.swp
 *.swo
+.cache/
+**/.cache/
 
 # ===== OS files =====
 .DS_Store
@@ -82,3 +82,7 @@ ctp_native/**/build/
 # CTP runtime flow/log dirs
 native/ctp_bridge/flow/
 dashboard/Logs/
+
+# Runtime state / local snapshots
+native_state.json
+*.pid

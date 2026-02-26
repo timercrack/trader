@@ -39,9 +39,9 @@ HANDLER_TIME_OUT = config.getint('TRADE', 'command_timeout', fallback=10)
 class TradeStrategy(BaseModule):
     def __init__(self, name: str):
         super().__init__()
-        self.__market_response_format = config.get('MSG_CHANNEL', 'market_response_format')
-        self.__trade_response_format = config.get('MSG_CHANNEL', 'trade_response_format')
-        self.__request_format = config.get('MSG_CHANNEL', 'request_format')
+        self.__market_response_format = config.get('MSG_CHANNEL', 'market_response_format', fallback='MSG:CTP:RSP:MARKET:{}:{}')
+        self.__trade_response_format = config.get('MSG_CHANNEL', 'trade_response_format', fallback='MSG:CTP:RSP:TRADE:{}:{}')
+        self.__request_format = config.get('MSG_CHANNEL', 'request_format', fallback='MSG:CTP:REQ:{}')
         self.__ignore_inst_list = config.get('TRADE', 'ignore_inst', fallback="WH,bb,JR,RI,RS,LR,PM,im").split(',')
         self.__strategy = Strategy.objects.get(name=name)
         self.__inst_ids = self.__strategy.instruments.all().values_list('product_code', flat=True)

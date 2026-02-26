@@ -26,6 +26,7 @@ import logging
 from logging import handlers
 from strategy.brother2 import TradeStrategy
 from utils.read_config import config_file, app_dir, config
+from weixin_notifier import install_weixin_log_handler
 
 
 if __name__ == '__main__':
@@ -43,6 +44,7 @@ if __name__ == '__main__':
     logger.setLevel('DEBUG')
     logger.addHandler(file_handler)
     logger.addHandler(console_handler)
+    install_weixin_log_handler(logger)
     logger = logging.getLogger("main")
     pid_path = os.path.join(app_dir.user_cache_dir, 'trader.pid')
     if not os.path.exists(pid_path):
