@@ -15,6 +15,9 @@
 # under the License.
 import sys
 import os
+import re
+import importlib
+import pathlib
 import django
 ROOT = os.path.dirname(os.path.abspath(__file__))
 if ROOT not in sys.path:
@@ -24,7 +27,34 @@ os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
 django.setup()
 import logging
 from logging import handlers
-from strategy.brother2 import TradeStrategy
+
+_strategy_dir = pathlib.Path(ROOT) / 'strategy'
+_brother_re = re.compile(r'^brother(\d+)\.py$')
+_candidates: list[tuple[int, str]] = []
+for f in _strategy_dir.iterdir():
+    m = _brother_re.match(f.name)
+    if m:
+        _candidates.append((int(m.group(1)), f.stem))
+_candidates.sort(reverse=True)
+
+TradeStrategy = None
+_strategy_name = None
+for _ver, _mod_name in _candidates:
+    try:
+        _mod = importlib.import_module(f'strategy.{_mod_name}')
+        TradeStrategy = _mod.TradeStrategy
+        _strategy_name = getattr(TradeStrategy, '__doc__', '')
+        if '—' in _strategy_name:
+            _strategy_name = _strategy_name.split('—')[0].strip()
+        elif '-' in _strategy_name:
+            _strategy_name = _strategy_name.split('-')[0].strip()
+        break
+    except ImportError:
+        continue
+
+if TradeStrategy is None:
+    raise RuntimeError('未找到任何 strategy/brotherXXX.py 策略文件')
+
 from utils.read_config import config_file, app_dir, config
 from weixin_notifier import install_weixin_log_handler
 
@@ -56,4 +86,5 @@ if __name__ == '__main__':
     print('used config file:', config_file)
     print('log stored in:', app_dir.user_log_dir)
     print('pid file:', pid_path)
-    TradeStrategy(name='大哥2.2').run()
+    print('strategy:', _strategy_name)
+    TradeStrategy(name=_strategy_name).run()

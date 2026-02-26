@@ -68,10 +68,16 @@ class PybindGateway(NativeGateway):
 
     async def start(self):
         try:
-            dll_dir = runtime_config.get('CTP_NATIVE', 'dll_dir', fallback=f'{REPO_ROOT}/native/ctp_bridge/api/win').strip()
+            def _resolve(path: str) -> str:
+                """将相对路径解析为相对于项目根目录的绝对路径"""
+                if path and not os.path.isabs(path):
+                    return os.path.normpath(os.path.join(REPO_ROOT, path))
+                return path
+
+            dll_dir = _resolve(runtime_config.get('CTP_NATIVE', 'dll_dir', fallback=f'{REPO_ROOT}/native/ctp_bridge/api/win').strip())
             if os.name == 'nt' and dll_dir and os.path.isdir(dll_dir):
                 os.add_dll_directory(dll_dir)
-            module_path = runtime_config.get('CTP_NATIVE', 'module_path', fallback=f'{REPO_ROOT}/native/ctp_bridge/build/Release').strip()
+            module_path = _resolve(runtime_config.get('CTP_NATIVE', 'module_path', fallback=f'{REPO_ROOT}/native/ctp_bridge/build/Release').strip())
             if module_path and module_path not in sys.path:
                 sys.path.insert(0, module_path)
             module_name = runtime_config.get('CTP_NATIVE', 'module', fallback='ctp_bridge_native')
@@ -100,7 +106,7 @@ class PybindGateway(NativeGateway):
                     **login_cfg,
                     'ip': runtime_config.get('CTP_NATIVE', 'ip', fallback='1.2.3.4'),
                     'mac': runtime_config.get('CTP_NATIVE', 'mac', fallback='02:03:04:5a:6b:7c'),
-                    'flow_path': runtime_config.get('CTP_NATIVE', 'flow_path', fallback=f'{REPO_ROOT}/native/ctp_bridge/flow'),
+                    'flow_path': _resolve(runtime_config.get('CTP_NATIVE', 'flow_path', fallback=f'{REPO_ROOT}/native/ctp_bridge/flow')),
                     'request_timeout_ms': self._request_timeout_ms,
                 })
             if self._cb and hasattr(self._client, 'set_event_callback'):

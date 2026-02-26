@@ -53,7 +53,7 @@ class Address(models.Model):
         verbose_name_plural = '前置地址列表'
 
     def __str__(self):
-        return '{}{}-{}'.format(self.name, self.get_operator_display(), self.get_type_display())
+        return '{}{}-{}'.format(self.name, self.get_operator_display(), self.get_type_display())  # type: ignore[attr-defined]
 
 
 class Broker(models.Model):
@@ -76,7 +76,7 @@ class Broker(models.Model):
         verbose_name_plural = '账户列表'
 
     def __str__(self):
-        return '{}-{}'.format(self.name, self.get_contract_type_display())
+        return '{}-{}'.format(self.name, self.get_contract_type_display())  # type: ignore[attr-defined]
 
 
 class Performance(models.Model):
@@ -113,13 +113,13 @@ class Strategy(models.Model):
 
     def get_instruments(self):
         return [inst for inst in self.instruments.all()]
-    get_instruments.short_description = '交易合约'
-    get_instruments.allow_tags = True
+    get_instruments.short_description = '交易合约'  # type: ignore[attr-defined]
+    get_instruments.allow_tags = True  # type: ignore[attr-defined]
 
     def get_force_opens(self):
         return [inst for inst in self.force_opens.all()]
-    get_force_opens.short_description = '手动开仓'
-    get_force_opens.allow_tags = True
+    get_force_opens.short_description = '手动开仓'  # type: ignore[attr-defined]
+    get_force_opens.allow_tags = True  # type: ignore[attr-defined]
 
 
 class Param(models.Model):
@@ -164,7 +164,7 @@ class Instrument(models.Model):
         verbose_name_plural = '合约列表'
 
     def __str__(self):
-        return '{}.{}'.format(self.get_exchange_display(), self.name)
+        return '{}.{}'.format(self.get_exchange_display(), self.name)  # type: ignore[attr-defined]
 
 
 class Signal(models.Model):
@@ -176,7 +176,7 @@ class Signal(models.Model):
     price = models.DecimalField('价格', max_digits=12, decimal_places=3, null=True, blank=True)
     volume = models.IntegerField('数量', null=True, blank=True)
     trigger_time = models.DateTimeField('发生时间')
-    priority = models.IntegerField('优先级', choices=PriorityType.choices, default=PriorityType.Normal)
+    priority = models.IntegerField('优先级', choices=PriorityType.choices, default=PriorityType.Normal)  # type: ignore[arg-type]
     processed = models.BooleanField('已处理', default=False, blank=True)
 
     class Meta:
@@ -252,7 +252,7 @@ class Order(models.Model):
         verbose_name_plural = '报单列表'
 
     def __str__(self):
-        return '{}-{}'.format(self.instrument, self.get_offset_flag_display())
+        return '{}-{}'.format(self.instrument, self.get_offset_flag_display())  # type: ignore[attr-defined]
 
 
 class Trade(models.Model):

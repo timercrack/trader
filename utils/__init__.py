@@ -87,13 +87,27 @@ def price_round(x: Decimal, base: Decimal):
 
 def get_next_id():
     if not hasattr(get_next_id, "request_id"):
-        get_next_id.request_id = 0
-    get_next_id.request_id = 1 if get_next_id.request_id == 65535 else get_next_id.request_id + 1
-    return get_next_id.request_id
+        get_next_id.request_id = 0  # type: ignore[attr-defined]
+    get_next_id.request_id = 1 if get_next_id.request_id == 65535 else get_next_id.request_id + 1  # type: ignore[attr-defined]
+    return get_next_id.request_id  # type: ignore[attr-defined]
 
 
 async def is_trading_day(day: datetime.datetime):
-    return day, day.strftime('%Y%m%d') in (state_store.get('TradingDay'), state_store.get('LastTradingDay'))
+    """
+    判断给定日期是否为交易日。
+    交易日 = 周一至周五 且 非法定节假日（调休周末交易所也不开盘）。
+    """
+    d = day.date() if hasattr(day, 'date') else day
+    if d.isoweekday() >= 6:
+        # 周末一律不交易，即使是调休工作日
+        return day, False
+    try:
+        from chinese_calendar import is_workday
+        # 工作日中排除法定节假日（如国庆、春节等落在周一~周五的）
+        return day, is_workday(d)
+    except Exception:
+        # chinese_calendar 不可用或日期超范围，回退到仅周末判断
+        return day, True
 
 
 async def check_trading_day(day: datetime.datetime) -> tuple[datetime.datetime, bool]:

@@ -186,4 +186,4 @@ class LocalRedisLikeClient:
 
     def _schedule(self, coro):
         if inspect.isawaitable(coro):
-            self._loop.call_soon_threadsafe(asyncio.create_task, coro)
+            self._loop.call_soon_threadsafe(asyncio.create_task, coro)  # type: ignore[arg-type]

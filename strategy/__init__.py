@@ -38,7 +38,6 @@ class BaseModule(CallbackFunctionContainer, metaclass=ABCMeta):
         asyncio.set_event_loop(self.io_loop)
         self.transport = 'native'
         self.redis_client = LocalRedisLikeClient(self.io_loop)
-        self.raw_redis = self.redis_client
         self.sub_client = self.redis_client.pubsub()
         self.initialized = False
         self.sub_tasks = list()

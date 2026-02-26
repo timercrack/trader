@@ -40,6 +40,9 @@ staticfiles/
 config.ini
 config.yaml
 examples/
+test/
+deploy/
+brother3.py
 # ===== IDE / Editor =====
 .idea/
 .vscode/

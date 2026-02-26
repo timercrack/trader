@@ -9,6 +9,7 @@ numpy
 pandas
 TA-Lib
 croniter
+chinese_calendar
 asynctest
 django-choices
 mysqlclient
