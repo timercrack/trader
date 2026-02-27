@@ -15,6 +15,7 @@ mysqlclient
 tqdm
 pytz
 tzdata
+akshare
 einops
 huggingface_hub
 matplotlib

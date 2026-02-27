@@ -566,6 +566,9 @@ class CtpClient {
             row["ExchangeID"] = decode_text(pStruct->ExchangeID);
             row["InstrumentName"] = decode_text(pStruct->InstrumentName);
             row["ProductID"] = decode_text(pStruct->ProductID);
+            row["CreateDate"] = decode_text(pStruct->CreateDate);
+            row["OpenDate"] = decode_text(pStruct->OpenDate);
+            row["ExpireDate"] = decode_text(pStruct->ExpireDate);
             row["ProductClass"] = pStruct->ProductClass;
             row["VolumeMultiple"] = pStruct->VolumeMultiple;
             row["PriceTick"] = pStruct->PriceTick;

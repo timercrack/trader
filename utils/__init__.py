@@ -19,11 +19,13 @@ from decimal import Decimal
 import datetime
 import math
 import re
+import socket
 import xml.etree.ElementTree as ET
 import asyncio
 import os
 from functools import reduce
 from itertools import combinations
+from typing import Any, cast
 
 import pytz
 import aiohttp
@@ -54,6 +56,26 @@ gfex_ip = 'www.gfex.com.cn'
 IGNORE_INST_LIST = config.get('TRADE', 'ignore_inst').split(',')
 INE_INST_LIST = ['sc', 'bc', 'nr', 'lu']
 ORDER_REF_SIGNAL_ID_START = -5
+
+
+def _create_http_connector() -> aiohttp.TCPConnector:
+    """创建更稳定的 HTTP 连接器：优先系统 DNS 解析并固定 IPv4。"""
+    return aiohttp.TCPConnector(
+        resolver=aiohttp.ThreadedResolver(),
+        family=socket.AF_INET,
+        ttl_dns_cache=300,
+        enable_cleanup_closed=True,
+        limit=30,
+    )
+
+
+def _create_http_session(timeout_total: float = 20.0) -> aiohttp.ClientSession:
+    timeout = aiohttp.ClientTimeout(total=timeout_total, connect=8, sock_connect=8, sock_read=15)
+    return aiohttp.ClientSession(
+        connector=_create_http_connector(),
+        timeout=timeout,
+        trust_env=True,
+    )
 
 
 def str_to_number(s):
@@ -111,7 +133,7 @@ async def is_trading_day(day: datetime.datetime):
 
 
 async def check_trading_day(day: datetime.datetime) -> tuple[datetime.datetime, bool]:
-    async with aiohttp.ClientSession() as session:
+    async with _create_http_session() as session:
         await max_conn_cffex.acquire()
         async with session.get(
                 'http://{}/fzjy/mrhq/{}/index.xml'.format(cffex_ip, day.strftime('%Y%m/%d')),
@@ -132,7 +154,7 @@ def get_expire_date(inst_code: str, day: datetime.datetime):
 
 async def update_from_shfe(day: datetime.datetime) -> bool:
     try:
-        async with aiohttp.ClientSession() as session:
+        async with _create_http_session() as session:
             day_str = day.strftime('%Y%m%d')
             await max_conn_shfe.acquire()
             async with session.get(f'http://{shfe_ip}/data/tradedata/future/dailydata/kx{day_str}.dat') as response:
@@ -188,7 +210,7 @@ async def update_from_shfe(day: datetime.datetime) -> bool:
 
 async def update_from_czce(day: datetime.datetime) -> bool:
     try:
-        async with aiohttp.ClientSession() as session:
+        async with _create_http_session() as session:
             day_str = day.strftime('%Y%m%d')
             async with session.get(
                     f'http://{czce_ip}/cn/DFSStaticFiles/Future/{day.year}/{day_str}/FutureDataDaily.txt') as response:
@@ -231,47 +253,130 @@ async def update_from_czce(day: datetime.datetime) -> bool:
 
 async def update_from_dce(day: datetime.datetime) -> bool:
     try:
-        async with aiohttp.ClientSession() as session:
-            await max_conn_dce.acquire()
-            async with session.post(f'http://{dce_ip}/publicweb/quotesdata/exportDayQuotesChData.html', data={
-                    'dayQuotes.variety': 'all', 'dayQuotes.trade_type': 0, 'exportFlag': 'txt',
-                    'year': day.year, 'month': day.month-1, 'day': day.day}) as response:
-                rst = await response.text()
-                max_conn_dce.release()
-                for lines in rst.split('\r\n')[3:-3]:
-                    if '小计' in lines or '品种' in lines:
-                        continue
-                    inst_data_raw = [x.strip() for x in lines.split('\t')]
-                    inst_data = []
-                    for cell in inst_data_raw:
-                        if len(cell) > 0:
-                            inst_data.append(cell)
-                    """
-    [0'商品名称', 1'交割月份', 2'开盘价', 3'最高价', 4'最低价', 5'收盘价', 6'前结算价', 7'结算价', 8'涨跌', 9'涨跌1', 10'成交量', 
-     11'持仓量', 12'持仓量变化', 13'成交额']
-    ['豆一', '1611', '3,760', '3,760', '3,760', '3,760', '3,860', '3,760', '-100', '-100', '2', '0', '0', '7.52']
-                    """
-                    if '小计' in inst_data[0]:
-                        continue
-                    if DCE_NAME_CODE[inst_data[0]] in IGNORE_INST_LIST:
-                        continue
-                    expire_date = inst_data[1].removeprefix(DCE_NAME_CODE[inst_data[0]])
-                    DailyBar.objects.update_or_create(
-                        code=inst_data[1],
-                        exchange=ExchangeType.DCE, time=day, defaults={
-                            'expire_date': expire_date,
-                            'open': inst_data[2].replace(',', '') if inst_data[2] != '-' else
-                            inst_data[5].replace(',', ''),
-                            'high': inst_data[3].replace(',', '') if inst_data[3] != '-' else
-                            inst_data[5].replace(',', ''),
-                            'low': inst_data[4].replace(',', '') if inst_data[4] != '-' else
-                            inst_data[5].replace(',', ''),
-                            'close': inst_data[5].replace(',', ''),
-                            'settlement': inst_data[7].replace(',', '') if inst_data[7] != '-' else
-                            inst_data[6].replace(',', ''),
-                            'volume': inst_data[10].replace(',', ''),
-                            'open_interest': inst_data[11].replace(',', '')})
-                return True
+        import akshare as ak
+
+        day_str = day.strftime('%Y%m%d')
+
+        def _pick_column(columns, candidates):
+            for item in candidates:
+                if item in columns:
+                    return item
+            return None
+
+        def _to_number(value, default=0.0):
+            if value is None:
+                return default
+            text = str(value).strip().replace(',', '')
+            if text in ['', '-', '--', 'nan', 'None']:
+                return default
+            return str_to_number(text)
+
+        await max_conn_dce.acquire()
+        try:
+            table_df = await asyncio.to_thread(ak.futures_hist_table_em)
+        finally:
+            max_conn_dce.release()
+
+        if table_df is None or table_df.empty:
+            logger.warning(f'update_from_dce empty futures_hist_table_em: day={day.date()}')
+            return False
+
+        columns = list(table_df.columns)
+        symbol_col = _pick_column(columns, ['名称', '合约名称', 'symbol', 'Symbol'])
+        code_col = _pick_column(columns, ['代码', '合约代码', 'code', 'Code'])
+        exchange_col = _pick_column(columns, ['交易所', '市场', 'exchange', 'Exchange'])
+
+        if not symbol_col:
+            logger.warning(f'update_from_dce missing symbol column in futures_hist_table_em: columns={columns}')
+            return False
+
+        # 过滤 DCE 可用合约；若无交易所列，则兜底用代码前缀匹配本地 DCE 品种
+        if exchange_col:
+            dce_df = table_df[table_df[exchange_col].astype(str).str.contains('大连|DCE|dce', regex=True, na=False)]
+        else:
+            code_prefixes = sorted({str(i.product_code).lower() for i in Instrument.objects.filter(exchange=ExchangeType.DCE)})
+            if code_col:
+                pattern = r'^(?:' + '|'.join(re.escape(p) for p in code_prefixes) + r')'
+                dce_df = table_df[table_df[code_col].astype(str).str.lower().str.contains(pattern, regex=True, na=False)]
+            else:
+                dce_df = table_df.iloc[0:0]
+
+        if dce_df.empty:
+            logger.warning(f'update_from_dce no dce rows in futures_hist_table_em: day={day.date()}')
+            return False
+
+        parsed_count = 0
+        for _, row in dce_df.iterrows():
+            symbol = str(row.get(symbol_col, '')).strip()
+            if not symbol:
+                continue
+
+            contract_code = ''
+            if code_col:
+                contract_code = str(row.get(code_col, '')).strip()
+            contract_code = contract_code.lower()
+
+            if not contract_code:
+                continue
+
+            product_code_match = re.findall('[A-Za-z]+', contract_code)
+            if not product_code_match:
+                continue
+            product_code = product_code_match[0].lower()
+            if product_code in IGNORE_INST_LIST:
+                continue
+
+            try:
+                await max_conn_dce.acquire()
+                try:
+                    hist_df = await asyncio.to_thread(
+                        ak.futures_hist_em,
+                        symbol=symbol,
+                        period='daily',
+                        start_date=day_str,
+                        end_date=day_str,
+                    )
+                finally:
+                    max_conn_dce.release()
+            except Exception:
+                continue
+
+            if hist_df is None or hist_df.empty:
+                continue
+
+            data = hist_df.iloc[-1]
+            close = _to_number(data.get('收盘'), 0)
+            open_price = _to_number(data.get('开盘'), close)
+            high = _to_number(data.get('最高'), close)
+            low = _to_number(data.get('最低'), close)
+            volume = _to_number(data.get('成交量'), 0)
+            open_interest = _to_number(data.get('持仓量'), 0)
+
+            if close == 0:
+                continue
+
+            DailyBar.objects.update_or_create(
+                code=contract_code,
+                exchange=ExchangeType.DCE,
+                time=day,
+                defaults={
+                    'expire_date': get_expire_date(contract_code, day),
+                    'open': open_price,
+                    'high': high,
+                    'low': low,
+                    'close': close,
+                    'settlement': close,
+                    'volume': volume,
+                    'open_interest': open_interest,
+                },
+            )
+            parsed_count += 1
+
+        if parsed_count == 0:
+            logger.warning(f'update_from_dce no rows parsed by akshare futures_hist_em: day={day.date()}')
+            return False
+        logger.info(f'update_from_dce akshare success: day={day.date()} rows={parsed_count}')
+        return True
     except Exception as e:
         logger.warning(f'update_from_dce failed: {repr(e)}', exc_info=True)
         return False
@@ -279,26 +384,44 @@ async def update_from_dce(day: datetime.datetime) -> bool:
 
 async def update_from_gfex(day: datetime.datetime) -> bool:
     try:
-        async with aiohttp.ClientSession() as session:
+        async with _create_http_session() as session:
             await max_conn_gfex.acquire()
-            for ids in ['lc', 'si']:
-                async with session.post(f'http://{gfex_ip}/gfexweb/Quote/getQuote_ftr', data={'varietyid': ids}) as response:
-                    rst = await response.text()
-                    rst = orjson.loads(rst)
-                    max_conn_gfex.release()
-                    for inst_code, inst_data in rst['contractQuote'].items():
-                        expire_date = inst_code.removeprefix(ids)
-                        DailyBar.objects.update_or_create(
-                            code=inst_code,
-                            exchange=ExchangeType.GFEX, time=day, defaults={
-                                'expire_date': expire_date,
-                                'open': inst_data['openPrice'] if inst_data['openPrice'] != "--" else inst_data['closePrice'],
-                                'high': inst_data['highPrice'] if inst_data['highPrice'] != "--" else inst_data['closePrice'],
-                                'low': inst_data['lowPrice'] if inst_data['lowPrice'] != "--" else inst_data['closePrice'],
-                                'close': inst_data['closePrice'],
-                                'settlement': inst_data['clearPrice'],
-                                'volume': inst_data['matchTotQty'] if inst_data['matchTotQty'] != "--" else 0,
-                                'open_interest': inst_data['openInterest'] if inst_data['openInterest'] != "--" else 0})
+            try:
+                for ids in ['lc', 'si', 'ps']:
+                    async with session.post(f'http://{gfex_ip}/gfexweb/Quote/getQuote_ftr', data={'varietyid': ids}) as response:
+                        rst = await response.text()
+                        rst_json = orjson.loads(rst)
+                        quote_map = rst_json.get('contractQuote') or {}
+                        for inst_code, inst_data in quote_map.items():
+                            expire_date = inst_code.removeprefix(ids)
+
+                            close_price = inst_data.get('closePrice')
+                            clear_price = inst_data.get('clearPrice')
+                            close = close_price if close_price not in [None, '', '--'] else clear_price
+                            if close in [None, '', '--']:
+                                close = 0
+
+                            open_price = inst_data.get('openPrice')
+                            high_price = inst_data.get('highPrice')
+                            low_price = inst_data.get('lowPrice')
+                            volume = inst_data.get('matchTotQty')
+                            open_interest = inst_data.get('openInterest')
+
+                            DailyBar.objects.update_or_create(
+                                code=inst_code,
+                                exchange=ExchangeType.GFEX, time=day, defaults={
+                                    'expire_date': expire_date,
+                                    'open': open_price if open_price not in [None, '', '--'] else close,
+                                    'high': high_price if high_price not in [None, '', '--'] else close,
+                                    'low': low_price if low_price not in [None, '', '--'] else close,
+                                    'close': close,
+                                    'settlement': clear_price if clear_price not in [None, '', '--'] else close,
+                                    'volume': volume if volume not in [None, '', '--'] else 0,
+                                    'open_interest': open_interest if open_interest not in [None, '', '--'] else 0,
+                                },
+                            )
+            finally:
+                max_conn_gfex.release()
     except Exception as e:
         logger.warning(f'update_from_gfex failed: {repr(e)}', exc_info=True)
         return False
@@ -307,7 +430,7 @@ async def update_from_gfex(day: datetime.datetime) -> bool:
 
 async def update_from_cffex(day: datetime.datetime) -> bool:
     try:
-        async with aiohttp.ClientSession() as session:
+        async with _create_http_session() as session:
             await max_conn_cffex.acquire()
             async with session.get(f"http://{cffex_ip}/sj/hqsj/rtj/{day.strftime('%Y%m/%d')}/index.xml?id=7") as response:
                 rst = await response.text()
@@ -343,9 +466,11 @@ async def update_from_cffex(day: datetime.datetime) -> bool:
                     product_id = (inst_data.findtext('productid') or '').strip()
                     if product_id in IGNORE_INST_LIST:
                         continue
+
                     close_price = (inst_data.findtext('closeprice') or '0').replace(',', '')
                     settlement_price = (inst_data.findtext('settlementprice') or '').replace(',', '')
                     pre_settlement = (inst_data.findtext('presettlementprice') or close_price).replace(',', '')
+
                     DailyBar.objects.update_or_create(
                         code=instrument_id,
                         exchange=ExchangeType.CFFEX, time=day, defaults={
@@ -356,7 +481,9 @@ async def update_from_cffex(day: datetime.datetime) -> bool:
                             'close': close_price,
                             'settlement': settlement_price if settlement_price else pre_settlement,
                             'volume': (inst_data.findtext('volume') or '0').replace(',', ''),
-                            'open_interest': (inst_data.findtext('openinterest') or '0').replace(',', '')})
+                            'open_interest': (inst_data.findtext('openinterest') or '0').replace(',', ''),
+                        },
+                    )
                 return True
     except Exception as e:
         logger.warning(f'update_from_cffex failed: {repr(e)}', exc_info=True)
@@ -416,7 +543,6 @@ def calc_main_inst(inst: Instrument, day: datetime.datetime):
         check_bar = DailyBar.objects.filter(code=inst.main_code).last()
         logger.error(f"calc_main_inst 未找到主力合约：{inst} 使用上一个主力合约")
     if check_bar is None:
-        logger.error(f"calc_main_inst 仍未找到可用主力合约：{inst}")
         return inst.main_code, updated
     if inst.main_code is None:  # 之前没有主力合约
         inst.main_code = check_bar.code
@@ -424,14 +550,11 @@ def calc_main_inst(inst: Instrument, day: datetime.datetime):
         inst.save(update_fields=['main_code', 'change_time'])
         store_main_bar(inst, check_bar)
     else:
-        current_main = inst.main_code
-        if current_main is None:
-            return inst.main_code, updated
-        check_code = check_bar.code
+        cur_main_code = cast(str, inst.main_code)
         # 主力合约发生变化, 做换月处理
-        if check_code and current_main != check_code and check_code > current_main:
-            inst.last_main = inst.main_code
-            inst.main_code = check_code
+        if check_bar.code and cur_main_code != check_bar.code and check_bar.code > cur_main_code:
+            inst.last_main = cur_main_code
+            inst.main_code = check_bar.code
             inst.change_time = day
             inst.save(update_fields=['last_main', 'main_code', 'change_time'])
             store_main_bar(inst, check_bar)
@@ -519,29 +642,40 @@ def find_best_score(n: int = 20):
 
 
 def calc_history_signal(inst: Instrument, day: datetime.datetime, strategy: Strategy):
-    param_set = strategy.param_set  # pyright: ignore[reportAttributeAccessIssue]
+    param_set = cast(Any, strategy).param_set
     break_n = param_set.get(code='BreakPeriod').int_value
     atr_n = param_set.get(code='AtrPeriod').int_value
     long_n = param_set.get(code='LongPeriod').int_value
     short_n = param_set.get(code='ShortPeriod').int_value
     stop_n = param_set.get(code='StopLoss').int_value
+    if not all([break_n, atr_n, long_n, short_n, stop_n]):
+        return
+
+    break_n = int(break_n)
+    atr_n = int(atr_n)
+    long_n = int(long_n)
+    short_n = int(short_n)
+    stop_n = int(stop_n)
     df = to_df(MainBar.objects.filter(
         time__lte=day.date(),
         exchange=inst.exchange, product_code=inst.product_code).order_by('time').values_list(
         'time', 'open', 'high', 'low', 'close', 'settlement'), index_col='time', parse_dates=['time'])
     df.index = pd.DatetimeIndex(df.time, tz=pytz.FixedOffset(480))
     df['atr'] = ATR(
-        np.asarray(df.high, dtype=float),
-        np.asarray(df.low, dtype=float),
-        np.asarray(df.close, dtype=float),
+        np.asarray(df.high, dtype=np.float64),
+        np.asarray(df.low, dtype=np.float64),
+        np.asarray(df.close, dtype=np.float64),
         timeperiod=atr_n,
     )
     # df columns: 0:time,1:open,2:high,3:low,4:close,5:settlement,6:atr,7:short_trend,8:long_trend
     df['short_trend'] = df.close
     df['long_trend'] = df.close
     for idx in range(1, df.shape[0]):
-        df.iloc[idx, 7] = (df.iloc[idx - 1, 7] * (short_n - 1) + df.iloc[idx, 4]) / short_n
-        df.iloc[idx, 8] = (df.iloc[idx - 1, 8] * (long_n - 1) + df.iloc[idx, 4]) / long_n
+        prev_short = cast(float, df.iloc[idx - 1, 7])
+        prev_long = cast(float, df.iloc[idx - 1, 8])
+        close_v = cast(float, df.iloc[idx, 4])
+        df.iloc[idx, 7] = (prev_short * (short_n - 1) + close_v) / short_n
+        df.iloc[idx, 8] = (prev_long * (long_n - 1) + close_v) / long_n
     df['high_line'] = df.close.rolling(window=break_n).max()
     df['low_line'] = df.close.rolling(window=break_n).min()
     cur_pos = 0
@@ -562,7 +696,7 @@ def calc_history_signal(inst: Instrument, day: datetime.datetime, strategy: Stra
                     trigger_time=prev_date, price=new_bar.open, volume=1, priority=PriorityType.LOW)
                 last_trade = Trade.objects.create(
                     broker=strategy.broker, strategy=strategy, instrument=inst,
-                    code=new_bar.code, direction=DirectionType.LONG.label,
+                    code=new_bar.code, direction=DirectionType.LONG,
                     open_time=cur_date, shares=1, filled_shares=1, avg_entry_price=new_bar.open)
                 cur_pos = cur_idx
             elif df.short_trend[idx] < df.long_trend[idx] and int(df.close[idx]) < int(df.low_line[idx-1]):
@@ -577,10 +711,10 @@ def calc_history_signal(inst: Instrument, day: datetime.datetime, strategy: Stra
                     trigger_time=prev_date, price=new_bar.open, volume=1, priority=PriorityType.LOW)
                 last_trade = Trade.objects.create(
                     broker=strategy.broker, strategy=strategy, instrument=inst,
-                    code=new_bar.code, direction=DirectionType.SHORT.label,
+                    code=new_bar.code, direction=DirectionType.SHORT,
                     open_time=cur_date, shares=1, filled_shares=1, avg_entry_price=new_bar.open)
                 cur_pos = cur_idx * -1
-        elif cur_pos > 0 and last_trade and prev_date > last_trade.open_time:
+        elif cur_pos > 0 and last_trade is not None and prev_date > last_trade.open_time:
             hh = float(MainBar.objects.filter(
                 exchange=inst.exchange, product_code=inst.product_code,
                 time__gte=last_trade.open_time,
@@ -589,21 +723,19 @@ def calc_history_signal(inst: Instrument, day: datetime.datetime, strategy: Stra
                 new_bar = MainBar.objects.filter(
                     exchange=inst.exchange, product_code=inst.product_code,
                     time=df.index[cur_idx].to_pydatetime().date()).first()
-                if new_bar is None:
+                if new_bar is None or last_trade.avg_entry_price is None:
                     continue
                 Signal.objects.create(
                     strategy=strategy, instrument=inst, type=SignalType.SELL, processed=True,
                     code=new_bar.code,
                     trigger_time=prev_date, price=new_bar.open, volume=1, priority=PriorityType.LOW)
-                if last_trade.avg_entry_price is None or inst.volume_multiple is None:
-                    continue
                 last_trade.avg_exit_price = new_bar.open
                 last_trade.close_time = cur_date
                 last_trade.closed_shares = 1
-                last_trade.profit = (new_bar.open - last_trade.avg_entry_price) * inst.volume_multiple
+                last_trade.profit = (new_bar.open - last_trade.avg_entry_price) * (inst.volume_multiple or 0)
                 last_trade.save()
                 cur_pos = 0
-        elif cur_pos < 0 and last_trade and prev_date > last_trade.open_time:
+        elif cur_pos < 0 and last_trade is not None and prev_date > last_trade.open_time:
             ll = float(MainBar.objects.filter(
                 exchange=inst.exchange, product_code=inst.product_code,
                 time__gte=last_trade.open_time,
@@ -612,32 +744,29 @@ def calc_history_signal(inst: Instrument, day: datetime.datetime, strategy: Stra
                 new_bar = MainBar.objects.filter(
                     exchange=inst.exchange, product_code=inst.product_code,
                     time=df.index[cur_idx].to_pydatetime().date()).first()
-                if new_bar is None:
+                if new_bar is None or last_trade.avg_entry_price is None:
                     continue
                 Signal.objects.create(
                     code=new_bar.code,
                     strategy=strategy, instrument=inst, type=SignalType.BUY_COVER, processed=True,
                     trigger_time=prev_date, price=new_bar.open, volume=1, priority=PriorityType.LOW)
-                if last_trade.avg_entry_price is None or inst.volume_multiple is None:
-                    continue
                 last_trade.avg_exit_price = new_bar.open
                 last_trade.close_time = cur_date
                 last_trade.closed_shares = 1
-                last_trade.profit = (last_trade.avg_entry_price - new_bar.open) * inst.volume_multiple
+                last_trade.profit = (last_trade.avg_entry_price - new_bar.open) * (inst.volume_multiple or 0)
                 last_trade.save()
                 cur_pos = 0
-        if cur_pos != 0 and last_trade and cur_date.date() == day.date():
-            if last_trade.avg_entry_price is None or inst.volume_multiple is None:
-                continue
+        if cur_pos != 0 and cur_date.date() == day.date() and last_trade is not None and last_trade.avg_entry_price is not None:
             last_trade.avg_exit_price = df.open[cur_idx]
             last_trade.close_time = cur_date
             last_trade.closed_shares = 1
-            if last_trade.direction == DirectionType.LONG.label:
+            open_price = Decimal(str(df.open[cur_idx]))
+            if last_trade.direction == DirectionType.LONG:
                 last_trade.profit = (last_trade.avg_entry_price - Decimal(df.open[cur_idx])) * \
-                                    inst.volume_multiple
+                                    (inst.volume_multiple or 0)
             else:
-                last_trade.profit = (Decimal(df.open[cur_idx]) - last_trade.avg_entry_price) * \
-                                    inst.volume_multiple
+                last_trade.profit = (open_price - last_trade.avg_entry_price) * \
+                                    (inst.volume_multiple or 0)
             last_trade.save()
 
 
@@ -649,30 +778,28 @@ def calc_his_all(day: datetime.datetime):
         last_day = Trade.objects.filter(instrument=inst, close_time__isnull=True).values_list(
             'open_time', flat=True).first()
         if last_day is None:
-            last_bar_day = MainBar.objects.filter(product_code=inst.product_code, time__lte=day).order_by(
+            last_main_day = MainBar.objects.filter(product_code=inst.product_code, time__lte=day).order_by(
                 '-time').values_list('time', flat=True).first()
-            if last_bar_day is None:
+            if last_main_day is None:
                 continue
-            last_day = timezone.make_aware(datetime.datetime.combine(last_bar_day, datetime.time.min))
+            last_day = timezone.make_aware(datetime.datetime.combine(last_main_day, datetime.time.min))
         calc_history_signal(inst, last_day, strategy)
 
 
 def calc_his_up_limit(inst: Instrument, bar: DailyBar):
-    ratio = inst.up_limit_ratio
-    if ratio is None or bar.settlement is None or inst.price_tick is None:
-        return Decimal(0)
-    ratio = Decimal(round(ratio, 3))
-    price = price_round(bar.settlement * (Decimal(1) + ratio), inst.price_tick)
-    return price - inst.price_tick
+    ratio = Decimal(round(float(inst.up_limit_ratio or Decimal('0')), 3))
+    settlement = cast(Decimal, bar.settlement or bar.close)
+    tick = cast(Decimal, inst.price_tick or Decimal('0.001'))
+    price = price_round(settlement * (Decimal(1) + ratio), tick)
+    return price - tick
 
 
 def calc_his_down_limit(inst: Instrument, bar: DailyBar):
-    ratio = inst.down_limit_ratio
-    if ratio is None or bar.settlement is None or inst.price_tick is None:
-        return Decimal(0)
-    ratio = Decimal(round(ratio, 3))
-    price = price_round(bar.settlement * (Decimal(1) - ratio), inst.price_tick)
-    return price + inst.price_tick
+    ratio = Decimal(round(float(inst.down_limit_ratio or Decimal('0')), 3))
+    settlement = cast(Decimal, bar.settlement or bar.close)
+    tick = cast(Decimal, inst.price_tick or Decimal('0.001'))
+    price = price_round(settlement * (Decimal(1) - ratio), tick)
+    return price + tick
 
 
 async def clean_daily_bar():

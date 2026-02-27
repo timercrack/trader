@@ -237,6 +237,8 @@ class BaseTradeStrategy(BaseModule):
         try:
             logger.debug("更新合约...")
             inst_dict = defaultdict(dict)
+            margin_rate_cache: dict[str, Any] = {}
+            fee_cache: dict[str, Any] = {}
             inst_list = await self.query('Instrument') or []
             for inst in inst_list:
                 if inst['empty']:
@@ -274,13 +276,19 @@ class BaseTradeStrategy(BaseModule):
                 update_field_list = list()
                 # 更新主力合约的保证金和手续费
                 if inst.main_code:
-                    margin_rate = await self.query('InstrumentMarginRate', InstrumentID=inst.main_code)
+                    margin_rate = margin_rate_cache.get(inst.main_code)
+                    if margin_rate is None:
+                        margin_rate = await self.query('InstrumentMarginRate', InstrumentID=inst.main_code)
+                        margin_rate_cache[inst.main_code] = margin_rate
                     if margin_rate:
                         inst.margin_rate = margin_rate[0]['LongMarginRatioByMoney']
                         update_field_list.append('margin_rate')
                     else:
                         logger.debug(f'{inst} 查询保证金率为空，跳过')
-                    fee = await self.query('InstrumentCommissionRate', InstrumentID=inst.main_code)
+                    fee = fee_cache.get(inst.main_code)
+                    if fee is None:
+                        fee = await self.query('InstrumentCommissionRate', InstrumentID=inst.main_code)
+                        fee_cache[inst.main_code] = fee
                     if fee:
                         inst.fee_money = Decimal(fee[0]['CloseRatioByMoney'])
                         inst.fee_volume = Decimal(fee[0]['CloseRatioByVolume'])
