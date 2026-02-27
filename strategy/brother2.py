@@ -71,7 +71,7 @@ class TradeStrategy(BaseTradeStrategy):
             priority = PriorityType.LOW
             if pos:
                 # 多头持仓
-                if pos.direction == DirectionType.values[DirectionType.LONG]:
+                if pos.direction == DirectionType.LONG.label:
                     first_pos = pos
                     while hasattr(first_pos, 'open_order') and first_pos.open_order and first_pos.open_order.signal and first_pos.open_order.signal.type == \
                             SignalType.ROLL_OPEN:

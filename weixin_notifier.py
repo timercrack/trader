@@ -29,6 +29,13 @@ from runtime_config import runtime_config
 logger = logging.getLogger('WeixinNotifier')
 
 
+def _silence_http_library_debug_logs():
+    """避免 requests/urllib3 的调试日志污染业务日志。"""
+    logging.getLogger('urllib3').setLevel(logging.WARNING)
+    logging.getLogger('urllib3.connectionpool').setLevel(logging.WARNING)
+    logging.getLogger('requests').setLevel(logging.WARNING)
+
+
 class WeixinNotifier:
     def __init__(self):
         self._corp_id = runtime_config.get('WEIXIN', 'CorpID', fallback='').strip()
@@ -49,6 +56,7 @@ class WeixinNotifier:
         if not self.enabled:
             logger.info('企业微信推送未启用：缺少 weixin.CorpID 或 weixin.Secret')
             return
+        _silence_http_library_debug_logs()
         if self._thread and self._thread.is_alive():
             return
         self._thread = threading.Thread(target=self._run, name='weixin-notifier', daemon=True)

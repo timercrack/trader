@@ -13,100 +13,100 @@
 # WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 # License for the specific language governing permissions and limitations
 # under the License.
-from djchoices import DjangoChoices, C
+from django.db import models
 
 
-class ContractType(DjangoChoices):
-    STOCK = C(label='股票')
-    FUTURE = C(label='期货')
-    OPTION = C(label='期权')
+class ContractType(models.TextChoices):
+    STOCK = 'STOCK', '股票'
+    FUTURE = 'FUTURE', '期货'
+    OPTION = 'OPTION', '期权'
 
 
-class ExchangeType(DjangoChoices):
-    SHFE = C(value='SHFE', label='上期所')
-    DCE = C(value='DCE', label='大商所')
-    CZCE = C(value='CZCE', label='郑商所')
-    CFFEX = C(value='CFFEX', label='中金所')
-    INE = C(value='INE', label='上期能源')
-    GFEX = C(value='GFEX', label='广交所')
+class ExchangeType(models.TextChoices):
+    SHFE = 'SHFE', '上期所'
+    DCE = 'DCE', '大商所'
+    CZCE = 'CZCE', '郑商所'
+    CFFEX = 'CFFEX', '中金所'
+    INE = 'INE', '上期能源'
+    GFEX = 'GFEX', '广交所'
 
 
-class SectionType(DjangoChoices):
-    Stock = C(label='股票')
-    Bond = C(label='债券')
-    Metal = C(label='基本金属')
-    Agricultural = C(label='农产品')
-    EnergyChemical = C(label='能源化工')
-    BlackMaterial = C(label='黑色建材')
+class SectionType(models.TextChoices):
+    Stock = 'Stock', '股票'
+    Bond = 'Bond', '债券'
+    Metal = 'Metal', '基本金属'
+    Agricultural = 'Agricultural', '农产品'
+    EnergyChemical = 'EnergyChemical', '能源化工'
+    BlackMaterial = 'BlackMaterial', '黑色建材'
 
 
-class SortType(DjangoChoices):
-    Stock = C(label='股票')
-    Bond = C(label='债券')
-    Rare = C(label='贵金属')
-    Metal = C(label='基本金属')
-    EdibleOil = C(label='食用油')
-    Feed = C(label='动物饲料')
-    Cotton = C(label='棉')
-    EnergyChemical = C(label='能源化工')
-    BlackMaterial = C(label='黑色建材')
+class SortType(models.TextChoices):
+    Stock = 'Stock', '股票'
+    Bond = 'Bond', '债券'
+    Rare = 'Rare', '贵金属'
+    Metal = 'Metal', '基本金属'
+    EdibleOil = 'EdibleOil', '食用油'
+    Feed = 'Feed', '动物饲料'
+    Cotton = 'Cotton', '棉'
+    EnergyChemical = 'EnergyChemical', '能源化工'
+    BlackMaterial = 'BlackMaterial', '黑色建材'
 
 
-class AddressType(DjangoChoices):
-    TRADE = C(label='交易')
-    MARKET = C(label='行情')
+class AddressType(models.TextChoices):
+    TRADE = 'TRADE', '交易'
+    MARKET = 'MARKET', '行情'
 
 
-class OperatorType(DjangoChoices):
-    TELECOM = C(label='电信')
-    UNICOM = C(label='联通')
+class OperatorType(models.TextChoices):
+    TELECOM = 'TELECOM', '电信'
+    UNICOM = 'UNICOM', '联通'
 
 
-class DirectionType(DjangoChoices):
-    LONG = C(label='多', value=b'0'[0])
-    SHORT = C(label='空', value=b'1'[0])
+class DirectionType(models.TextChoices):
+    LONG = '0', '多'
+    SHORT = '1', '空'
 
 
-class CombOffsetFlag(DjangoChoices):  # 订单开平标志
-    Open = C(label='开', value='0')
-    Close = C(label='平', value='1')
-    ForceClose = C(label='强平', value='2')
-    CloseToday = C(label='平', value='3')
-    CloseYesterday = C(label='平昨', value='4')
-    ForceOff = C(label='强减', value='5')
-    LocalForceClose = C(label='本地强平', value='6')
+class CombOffsetFlag(models.TextChoices):  # 订单开平标志
+    Open = '0', '开'
+    Close = '1', '平'
+    ForceClose = '2', '强平'
+    CloseToday = '3', '平'
+    CloseYesterday = '4', '平昨'
+    ForceOff = '5', '强减'
+    LocalForceClose = '6', '本地强平'
 
 
-class OffsetFlag(DjangoChoices):  # 开平标志
-    Open = C(label='开', value=b'0'[0])
-    Close = C(label='平', value=b'1'[0])
-    ForceClose = C(label='强平', value=b'2'[0])
-    CloseToday = C(label='平今', value=b'3'[0])
-    CloseYesterday = C(label='平昨', value=b'4'[0])
-    ForceOff = C(label='强减', value=b'5'[0])
-    LocalForceClose = C(label='本地强平', value=b'6'[0])
+class OffsetFlag(models.TextChoices):  # 开平标志
+    Open = '0', '开'
+    Close = '1', '平'
+    ForceClose = '2', '强平'
+    CloseToday = '3', '平今'
+    CloseYesterday = '4', '平昨'
+    ForceOff = '5', '强减'
+    LocalForceClose = '6', '本地强平'
 
 
-class OrderStatus(DjangoChoices):  # 报单状态
-    AllTraded = C(value=b'0'[0], label='全部成交')
-    PartTradedQueueing = C(value=b'1'[0], label='部分成交还在队列中')
-    PartTradedNotQueueing = C(value=b'2'[0], label='部分成交不在队列中')
-    NoTradeQueueing = C(value=b'3'[0], label='未成交还在队列中')
-    NoTradeNotQueueing = C(value=b'4'[0], label='未成交不在队列中')
-    Canceled = C(value=b'5'[0], label='撤单')
-    Unknown = C(value=b'a'[0], label='未知')
-    NotTouched = C(value=b'b'[0], label='尚未触发')
-    Touched = C(value=b'c'[0], label='已触发')
+class OrderStatus(models.TextChoices):  # 报单状态
+    AllTraded = '0', '全部成交'
+    PartTradedQueueing = '1', '部分成交还在队列中'
+    PartTradedNotQueueing = '2', '部分成交不在队列中'
+    NoTradeQueueing = '3', '未成交还在队列中'
+    NoTradeNotQueueing = '4', '未成交不在队列中'
+    Canceled = '5', '撤单'
+    Unknown = 'a', '未知'
+    NotTouched = 'b', '尚未触发'
+    Touched = 'c', '已触发'
 
 
-class OrderSubmitStatus(DjangoChoices):  # 报单提交状态
-    InsertSubmitted = C(value=b'0'[0], label='已经提交')
-    CancelSubmitted = C(value=b'1'[0], label='撤单已经提交')
-    ModifySubmitted = C(value=b'2'[0], label='修改已经提交')
-    Accepted = C(value=b'3'[0], label='已经接受')
-    InsertRejected = C(value=b'4'[0], label='报单已经被拒绝')
-    CancelRejected = C(value=b'5'[0], label='撤单已经被拒绝')
-    ModifyRejected = C(value=b'6'[0], label='改单已经被拒绝')
+class OrderSubmitStatus(models.TextChoices):  # 报单提交状态
+    InsertSubmitted = '0', '已经提交'
+    CancelSubmitted = '1', '撤单已经提交'
+    ModifySubmitted = '2', '修改已经提交'
+    Accepted = '3', '已经接受'
+    InsertRejected = '4', '报单已经被拒绝'
+    CancelRejected = '5', '撤单已经被拒绝'
+    ModifyRejected = '6', '改单已经被拒绝'
 
 
 DCE_NAME_CODE = {
@@ -162,16 +162,16 @@ KT_MARKET = {
 }
 
 
-class SignalType(DjangoChoices):
-    ROLL_CLOSE = C(label='换月平旧')
-    ROLL_OPEN = C(label='换月开新')
-    BUY = C(label='买开')
-    SELL_SHORT = C(label='卖开')
-    SELL = C(label='卖平')
-    BUY_COVER = C(label='买平')
+class SignalType(models.TextChoices):
+    ROLL_CLOSE = 'ROLL_CLOSE', '换月平旧'
+    ROLL_OPEN = 'ROLL_OPEN', '换月开新'
+    BUY = 'BUY', '买开'
+    SELL_SHORT = 'SELL_SHORT', '卖开'
+    SELL = 'SELL', '卖平'
+    BUY_COVER = 'BUY_COVER', '买平'
 
 
-class PriorityType(DjangoChoices):
-    LOW = C(label='低', value=0)
-    Normal = C(label='普通', value=1)
-    High = C(label='高', value=2)
+class PriorityType(models.IntegerChoices):
+    LOW = 0, '低'
+    Normal = 1, '普通'
+    High = 2, '高'

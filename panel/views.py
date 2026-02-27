@@ -68,7 +68,7 @@ class CorrelationView(CustomBaseView):
         sections = context['cur_stra'].instruments.order_by('section').values_list('section', flat=True).distinct()
         inst_list = list()
         for sec in sections:
-            inst_list.append((SectionType.values[sec], context['cur_stra'].instruments.filter(
+            inst_list.append((SectionType(sec).label, context['cur_stra'].instruments.filter(
                 section=sec).order_by('-exchange')))
         context['inst_list'] = inst_list
         context['strategy_inst'] = context['cur_stra'].instruments.values_list('id', flat=True)
@@ -81,7 +81,7 @@ class InstrumentView(CustomBaseView):
         exchanges = Instrument.objects.all().values_list('exchange', flat=True).distinct()
         inst_list = dict()
         for ex in exchanges:
-            inst_list[ExchangeType.values[ex]] = context['cur_stra'].instruments.filter(exchange=ex)
+            inst_list[ExchangeType(ex).label] = context['cur_stra'].instruments.filter(exchange=ex)
         context['inst_list'] = inst_list
         return context
 

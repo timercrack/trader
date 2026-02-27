@@ -122,7 +122,7 @@ class BaseTradeStrategy(BaseModule):
             for order in order_list:
                 # 未成交订单
                 if int(order['OrderStatus']) in range(1, 5) and order['OrderSubmitStatus'] == ApiStruct.OSS_Accepted:
-                    direct_str = DirectionType.values[order['Direction']]
+                    direct_str = DirectionType(order['Direction']).label
                     logger.info(f"撤销未成交订单: 合约{order['InstrumentID']} {direct_str}单 {order['VolumeTotal']}手 价格{order['LimitPrice']}")
                     await self.cancel_order(order)
                 # 已成交订单
@@ -182,10 +182,10 @@ class BaseTradeStrategy(BaseModule):
                 p_code = self._re_extract_code.match(pos['InstrumentID']).group(1)
                 inst = Instrument.objects.get(product_code=p_code)
                 trade = Trade.objects.filter(broker=self._broker, strategy=self._strategy, instrument=inst, code=pos['InstrumentID'], close_time__isnull=True,
-                                             direction=DirectionType.values[pos['Direction']]).first()
+                                             direction=DirectionType(pos['Direction']).label).first()
                 bar = DailyBar.objects.filter(code=pos['InstrumentID']).order_by('-time').first()
                 profit = (bar.close - Decimal(pos['OpenPrice'])) * pos['Volume'] * inst.volume_multiple
-                if pos['Direction'] == DirectionType.values[DirectionType.SHORT]:
+                if pos['Direction'] == DirectionType.SHORT:
                     profit *= -1
                 if trade:
                     trade.shares = (trade.closed_shares if trade.closed_shares else 0) + pos['Volume']
@@ -195,7 +195,7 @@ class BaseTradeStrategy(BaseModule):
                 else:
                     Trade.objects.create(
                         broker=self._broker, strategy=self._strategy, instrument=inst, code=pos['InstrumentID'], profit=profit, filled_shares=pos['Volume'],
-                        direction=DirectionType.values[pos['Direction']], avg_entry_price=Decimal(pos['OpenPrice']), shares=pos['Volume'],
+                        direction=DirectionType(pos['Direction']).label, avg_entry_price=Decimal(pos['OpenPrice']), shares=pos['Volume'],
                         open_time=timezone.make_aware(datetime.datetime.strptime(pos['OpenDate'] + '08', '%Y%m%d%H')), frozen_margin=Decimal(pos['Margin']),
                         cost=pos['Volume'] * Decimal(pos['OpenPrice']) * inst.fee_money * inst.volume_multiple + pos['Volume'] * inst.fee_volume)
             logger.debug('更新持仓完成!')
@@ -379,15 +379,14 @@ class BaseTradeStrategy(BaseModule):
                     param_dict['CombOffsetFlag'] = ApiStruct.OF_Close
                     pos = Trade.objects.filter(
                         broker=self._broker, strategy=self._strategy, code=sig.code, shares=sig.volume, close_time__isnull=True,
-                        direction=DirectionType.values[DirectionType.SHORT] if sig.type == SignalType.BUY_COVER else DirectionType.values[
-                            DirectionType.LONG]).first()
+                        direction=DirectionType.SHORT.label if sig.type == SignalType.BUY_COVER else DirectionType.LONG.label).first()
                     if pos.open_time.astimezone().date() == timezone.localtime().date() and pos.instrument.exchange == ExchangeType.SHFE:
                         param_dict['CombOffsetFlag'] = ApiStruct.OF_CloseToday  # 上期所区分平今和平昨
                     logger.info(f'{sig.instrument} {sig.type}{sig.volume}手 价格: {sig.price}')
                 case SignalType.ROLL_CLOSE:
                     param_dict['CombOffsetFlag'] = ApiStruct.OF_Close
                     pos = Trade.objects.filter(broker=self._broker, strategy=self._strategy, code=sig.code, shares=sig.volume, close_time__isnull=True).first()
-                    param_dict['Direction'] = ApiStruct.D_Sell if pos.direction == DirectionType.values[DirectionType.LONG] else ApiStruct.D_Buy
+                    param_dict['Direction'] = ApiStruct.D_Sell if pos.direction == DirectionType.LONG.label else ApiStruct.D_Buy
                     if pos.open_time.astimezone().date() == timezone.localtime().date() and pos.instrument.exchange == ExchangeType.SHFE:
                         param_dict['CombOffsetFlag'] = ApiStruct.OF_CloseToday  # 上期所区分平今和平昨
                     logger.info(f'{sig.code}->{sig.instrument.main_code} {pos.direction}头换月平旧{sig.volume}手 价格: {sig.price}')
@@ -396,7 +395,7 @@ class BaseTradeStrategy(BaseModule):
                     pos = Trade.objects.filter(
                         Q(close_time__isnull=True) | Q(close_time__date__gte=timezone.localtime().now().date()),
                         broker=self._broker, strategy=self._strategy, code=sig.instrument.last_main, shares=sig.volume).first()
-                    param_dict['Direction'] = ApiStruct.D_Buy if pos.direction == DirectionType.values[DirectionType.LONG] else ApiStruct.D_Sell
+                    param_dict['Direction'] = ApiStruct.D_Buy if pos.direction == DirectionType.LONG.label else ApiStruct.D_Sell
                     logger.info(f'{pos.code}->{sig.code} {pos.direction}头换月开新{sig.volume}手 价格: {sig.price}')
             self.redis_client.publish(self._request_format.format('ReqOrderInsert'), orjson.dumps(param_dict))
         except Exception as e:
@@ -448,10 +447,10 @@ class BaseTradeStrategy(BaseModule):
     @staticmethod
     def get_trade_string(trade: dict) -> str:
         if trade['OffsetFlag'] == OffsetFlag.Open:
-            open_direct = DirectionType.values[trade['Direction']]
+            open_direct = DirectionType(trade['Direction']).label
         else:
-            open_direct = DirectionType.values[DirectionType.LONG] if trade['Direction'] == DirectionType.SHORT else DirectionType.values[DirectionType.SHORT]
-        return f"{trade['ExchangeID']}.{trade['InstrumentID']} {OffsetFlag.values[trade['OffsetFlag']]}{open_direct}已成交{trade['Volume']}手 " \
+            open_direct = DirectionType.LONG.label if trade['Direction'] == DirectionType.SHORT else DirectionType.SHORT.label
+        return f"{trade['ExchangeID']}.{trade['InstrumentID']} {OffsetFlag(trade['OffsetFlag']).label}{open_direct}已成交{trade['Volume']}手 " \
                f"价格:{trade['Price']} 时间:{trade['TradeTime']} 订单号: {trade['OrderRef']}"
 
     # ═══════════════════════════════════════════════════════════════════
@@ -483,14 +482,14 @@ class BaseTradeStrategy(BaseModule):
                 last_trade = Trade.objects.filter(
                     broker=self._broker, strategy=self._strategy, instrument=inst, code=trade['InstrumentID'], open_time__lte=trade_time,
                     close_time__isnull=True,
-                    direction=DirectionType.values[trade['Direction']]).first() if manual_trade else Trade.objects.filter(open_order=order).first()
+                    direction=DirectionType(trade['Direction']).label).first() if manual_trade else Trade.objects.filter(open_order=order).first()
                 if last_trade is None:
                     new_trade = True
                     last_trade = Trade.objects.create(
                         broker=self._broker, strategy=self._strategy, instrument=inst, code=trade['InstrumentID'], open_order=order if order else None,
-                        direction=DirectionType.values[trade['Direction']], open_time=trade_time, shares=order.volume if order else trade['Volume'],
+                        direction=DirectionType(trade['Direction']).label, open_time=trade_time, shares=order.volume if order else trade['Volume'],
                         cost=trade_cost, filled_shares=trade['Volume'], avg_entry_price=trade['Price'], frozen_margin=trade_margin)
-                if order is None or order.status == OrderStatus.values[OrderStatus.AllTraded]:
+                if order is None or order.status == OrderStatus.AllTraded.label:
                     trade_completed = True
                 if (not new_trade and not manual_trade) or (trade_completed and not new_trade and manual_trade):
                     last_trade.avg_entry_price = (last_trade.avg_entry_price * last_trade.filled_shares + trade['Volume'] * Decimal(trade['Price'])) / \
@@ -502,7 +501,7 @@ class BaseTradeStrategy(BaseModule):
                     last_trade.frozen_margin += trade_margin
                     last_trade.save()
             else:  # 平仓
-                open_direct = DirectionType.values[DirectionType.LONG] if trade['Direction'] == DirectionType.SHORT else DirectionType.values[DirectionType.SHORT]
+                open_direct = DirectionType.LONG.label if trade['Direction'] == DirectionType.SHORT else DirectionType.SHORT.label
                 last_trade = Trade.objects.filter(Q(closed_shares__isnull=True) | Q(closed_shares__lt=F('shares')), shares=F('filled_shares'),
                                                   broker=self._broker, strategy=self._strategy, instrument=inst, code=trade['InstrumentID'],
                                                   direction=open_direct).first()
@@ -520,7 +519,7 @@ class BaseTradeStrategy(BaseModule):
                     if last_trade.closed_shares == last_trade.shares:  # 全部成交
                         trade_completed = True
                         last_trade.close_time = trade_time
-                        if last_trade.direction == DirectionType.values[DirectionType.LONG]:
+                        if last_trade.direction == DirectionType.LONG.label:
                             profit_point = last_trade.avg_exit_price - last_trade.avg_entry_price
                         else:
                             profit_point = last_trade.avg_entry_price - last_trade.avg_exit_price
@@ -546,8 +545,8 @@ class BaseTradeStrategy(BaseModule):
                 code=order['InstrumentID'], order_ref=order['OrderRef'], defaults={
                     'broker': signal.strategy.broker, 'strategy': signal.strategy, 'instrument': signal.instrument, 'front': order['FrontID'],
                     'session': order['SessionID'], 'price': order['LimitPrice'], 'volume': order['VolumeTotalOriginal'],
-                    'direction': DirectionType.values[order['Direction']], 'status': OrderStatus.values[order['OrderStatus']],
-                    'offset_flag': CombOffsetFlag.values[order['CombOffsetFlag']], 'update_time': timezone.localtime(),
+                    'direction': DirectionType(order['Direction']).label, 'status': OrderStatus(order['OrderStatus']).label,
+                    'offset_flag': CombOffsetFlag(order['CombOffsetFlag']).label, 'update_time': timezone.localtime(),
                     'send_time': timezone.make_aware(datetime.datetime.strptime(order['InsertDate'] + order['InsertTime'], '%Y%m%d%H:%M:%S'))})
             if order['OrderStatus'] == ApiStruct.OST_Canceled:  # 删除错误订单
                 odr.delete()
@@ -564,13 +563,13 @@ class BaseTradeStrategy(BaseModule):
 
     @staticmethod
     def get_order_string(order: dict) -> str:
-        off_set_flag = CombOffsetFlag.values[order['CombOffsetFlag']] if order['CombOffsetFlag'] in CombOffsetFlag.values else \
-            OffsetFlag.values[order['CombOffsetFlag']]
-        order_str = f"订单号:{order['OrderRef']},{order['ExchangeID']}.{order['InstrumentID']} {off_set_flag}{DirectionType.values[order['Direction']]}" \
+        off_set_flag = CombOffsetFlag(order['CombOffsetFlag']).label if order['CombOffsetFlag'] in CombOffsetFlag.values else \
+            OffsetFlag(order['CombOffsetFlag']).label
+        order_str = f"订单号:{order['OrderRef']},{order['ExchangeID']}.{order['InstrumentID']} {off_set_flag}{DirectionType(order['Direction']).label}" \
                     f"{order['VolumeTotalOriginal']}手 价格:{order['LimitPrice']} 报单时间:{order['InsertTime']} " \
-                    f"提交状态:{OrderSubmitStatus.values[order['OrderSubmitStatus']]} "
+                    f"提交状态:{OrderSubmitStatus(order['OrderSubmitStatus']).label} "
         if order['OrderStatus'] != OrderStatus.Unknown:
-            order_str += f"成交状态:{OrderStatus.values[order['OrderStatus']]} 消息:{order['StatusMsg']} "
+            order_str += f"成交状态:{OrderStatus(order['OrderStatus']).label} 消息:{order['StatusMsg']} "
             if order['OrderStatus'] == OrderStatus.PartTradedQueueing:
                 order_str += f"成交数量:{order['VolumeTraded']} 剩余数量:{order['VolumeTotal']}"
         return order_str
